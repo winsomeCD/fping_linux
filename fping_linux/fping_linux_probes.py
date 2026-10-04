@@ -122,6 +122,7 @@ class ProbeTask(QRunnable):
         payload_size: int,
         timeout: float,
         interval: float,
+        send_gap_ms: int,
     ):
         super().__init__()
         self.run_id = run_id
@@ -129,6 +130,7 @@ class ProbeTask(QRunnable):
         self.payload_size = payload_size
         self.timeout = timeout
         self.interval = interval
+        self.send_gap_ms = send_gap_ms
         self.signals = ProbeSignals()
         self._stop_requested = threading.Event()
         self._loop = None
@@ -165,11 +167,11 @@ class ProbeTask(QRunnable):
         command.extend([
             "-l", "-e", "-u",
             "-b", str(self.payload_size),
+            "-i", str(self.send_gap_ms),
             "-p", str(period_ms),
             "-t", str(timeout_ms),
             "-r", "0",
         ])
-        process = None
         try:
             process = await asyncio.create_subprocess_exec(
                 *command,
@@ -177,23 +179,13 @@ class ProbeTask(QRunnable):
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            process.stdin.write(("\n".join(self.targets) + "\n").encode())
-            await process.stdin.drain()
-            process.stdin.close()
-            await process.stdin.wait_closed()
-        except (OSError, AttributeError):
-            if process is not None and process.returncode is None:
-                try:
-                    process.terminate()
-                except ProcessLookupError:
-                    pass
-                await process.wait()
+        except OSError as error:
             for target in self.targets:
                 self.signals.completed.emit(
                     self.run_id, target,
                     ProbeResult(
                         "Probe Error",
-                        error="Could not start fping. Verify its installation and ICMP permissions.",
+                        error=f"Could not start fping: {error}",
                         packet_sent=False,
                     ),
                 )
@@ -217,6 +209,42 @@ class ProbeTask(QRunnable):
                 self.signals.completed.emit(self.run_id, target, result)
 
         reader_task = asyncio.create_task(consume_results())
+        try:
+            # Keep both output pipes draining while fping reads the target list.
+            # Otherwise a large/slow FQDN list can deadlock on full OS pipes.
+            for target in self.targets:
+                if self._async_stop_event.is_set():
+                    break
+                process.stdin.write((target + "\n").encode())
+                await process.stdin.drain()
+            process.stdin.close()
+            await process.stdin.wait_closed()
+        except (OSError, AttributeError) as error:
+            if process.returncode is None:
+                try:
+                    process.terminate()
+                except ProcessLookupError:
+                    pass
+                try:
+                    await asyncio.wait_for(process.wait(), timeout=1.5)
+                except asyncio.TimeoutError:
+                    try:
+                        process.kill()
+                    except ProcessLookupError:
+                        pass
+                    await process.wait()
+            if not reader_task.done():
+                reader_task.cancel()
+            await asyncio.gather(reader_task, return_exceptions=True)
+            stderr = (await stderr_task).decode(errors="replace").strip()
+            error_text = stderr or f"Could not send target list to fping: {error}"
+            for target in self.targets:
+                self.signals.completed.emit(
+                    self.run_id, target,
+                    ProbeResult("Probe Error", error=error_text, packet_sent=False),
+                )
+            return
+
         stop_task = asyncio.create_task(self._async_stop_event.wait())
         done, _ = await asyncio.wait(
             (reader_task, stop_task), return_when=asyncio.FIRST_COMPLETED

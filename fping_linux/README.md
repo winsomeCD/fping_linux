@@ -18,7 +18,7 @@ Linux-only multi-host ICMP reachability and latency dashboard built with **PySid
 - **Host detail dialog** — double-click a row for stats + recent timeline
 - **Theme toggle** — dark / light mode (🌙 / ☀️)
 - **Import hosts** — load from `.txt` or `.csv`
-- **Config save/load** — atomically persists hosts, settings, and theme to `ping_monitor_config.json`
+- **Config save/load** — atomically persists hosts, settings, and theme to `fping_linux_config.json`
 - **Export reports** — TXT with a top-level overview, CSV with per-host summary and probe rows, or XLSX with Summary Info, Host Details, and Probe Details tabs
 - **Search / filter** — live filter on the host table
 - **Log limiting** — timeline capped at 1000 entries per host
@@ -28,7 +28,7 @@ Linux-only multi-host ICMP reachability and latency dashboard built with **PySid
 ## Requirements
 
 ```bash
-python -m pip install -r requirements.txt
+python -m pip install -r requirements_fping_linux.txt
 ```
 
 This installs **PySide6** for the desktop UI.
@@ -37,7 +37,7 @@ This installs **PySide6** for the desktop UI.
 
 Install **fping 5.0 or newer** using your Linux distribution's package manager. The app checks for fping at startup and will not start monitoring if it is missing or too old. JSON output is used when available; fping 5.0–5.4 uses standard per-probe text output.
 
-fping uses a single process to schedule probes across the target list in a paced round-robin loop. The app has no fixed maximum host count or parallel setting; actual rate and capacity depend on fping, Linux socket permissions, system resources, and the network.
+fping uses a single process to schedule probes across the target list in a paced round-robin loop. The GUI exposes its payload size (`-b`), global send gap in milliseconds (`-i`), per-host repeat period in seconds (`-p`), and timeout in seconds (`-t`). A smaller global send gap sends the first sweep faster; its default is 10 ms. The per-host period is kept at least as long as the timeout. The app has no fixed maximum host count or parallel setting; actual rate and capacity depend on fping, Linux socket permissions, system resources, and the network.
 
 Install fping from your distribution package repository so its ICMP permissions are configured by the package. The application does not need to run as root.
 
@@ -46,12 +46,12 @@ Install fping from your distribution package repository so its ICMP permissions 
 ## Quick start
 
 ```bash
-python -m pip install -r requirements.txt
-python ping_monitor.py
+python -m pip install -r requirements_fping_linux.txt
+python fping_linux.py
 ```
 
 1. Enter hosts (comma-separated) or click **Import**. `IP-test.txt` and `ping_domains.txt` are supplied import samples.
-2. Adjust packet size, interval, timeout, and chart history if needed.
+2. Adjust payload size (`-b`), global send gap (`-i`), host period (`-p`), timeout (`-t`), and chart history if needed.
 3. Click **Start Monitoring**.
 4. Double-click a row for details; use **Export TXT / CSV** when finished.
 
@@ -76,7 +76,7 @@ python ping_monitor.py
 On first **Save Config**, settings are written to:
 
 ```
-ping_monitor_config.json
+fping_linux_config.json
 ```
 
 The path is anchored to the application directory, so launching from another working directory uses the same settings file. Writes are atomic. Invalid config is reported and the application continues with defaults; unsupported values are rejected without partially applying the file.
@@ -87,8 +87,9 @@ Fields:
 {
   "hosts": "8.8.8.8, 1.1.1.1, google.com",
   "packet_size": 56,
-  "interval": 1.0,
+  "interval": 2.0,
   "timeout": 2.0,
+  "send_gap_ms": 10,
   "history_points": 60,
   "dark_theme": true
 }
@@ -124,15 +125,15 @@ Loaded automatically on startup if present.
 ```
 .
 ├── README.md
-├── ping_monitor.py          # PySide6 application and dashboard
-├── probes.py                # Linux fping backend and worker task
-├── ping_monitor_config.json # Saved runtime settings
+├── fping_linux.py          # PySide6 application and dashboard
+├── fping_linux_probes.py                # Linux fping backend and worker task
+├── fping_linux_config.json # Saved runtime settings
 ├── IP-test.txt              # Supplied host-list import sample
 ├── ping_domains.txt         # Supplied 500-host import sample (used by tests)
-├── requirements.txt
+├── requirements_fping_linux.txt
 └── tests/
-    ├── test_ping_monitor.py
-    └── test_probes.py
+    ├── test_fping_linux.py
+    └── test_fping_linux_probes.py
 ```
 
 Run the regression tests with:

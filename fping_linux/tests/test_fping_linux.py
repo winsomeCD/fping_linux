@@ -16,8 +16,8 @@ sys.path.insert(0, str(PROJECT_DIR))
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication, QTableWidgetItem
 
-import ping_monitor
-from probes import ProbeResult
+import fping_linux
+from fping_linux_probes import ProbeResult
 
 
 class PingMonitorAppTests(unittest.TestCase):
@@ -27,16 +27,16 @@ class PingMonitorAppTests(unittest.TestCase):
 
     def setUp(self):
         self.temporary_directory = tempfile.TemporaryDirectory()
-        self.original_config_path = ping_monitor.PingMonitorApp.CONFIG_FILE
-        ping_monitor.PingMonitorApp.CONFIG_FILE = Path(self.temporary_directory.name) / "config.json"
-        self.window = ping_monitor.PingMonitorApp()
+        self.original_config_path = fping_linux.PingMonitorApp.CONFIG_FILE
+        fping_linux.PingMonitorApp.CONFIG_FILE = Path(self.temporary_directory.name) / "config.json"
+        self.window = fping_linux.PingMonitorApp()
         self.window._msg = lambda *args: None
         self.window._confirm = lambda *args: False
 
     def tearDown(self):
         self.window.close()
         self.application.processEvents()
-        ping_monitor.PingMonitorApp.CONFIG_FILE = self.original_config_path
+        fping_linux.PingMonitorApp.CONFIG_FILE = self.original_config_path
         self.temporary_directory.cleanup()
 
     def test_theme_is_saved_and_restored(self):
@@ -48,7 +48,7 @@ class PingMonitorAppTests(unittest.TestCase):
         saved_config = json.loads(Path(self.window.CONFIG_FILE).read_text(encoding="utf-8"))
         self.assertIs(saved_config["dark_theme"], False)
 
-        restored_window = ping_monitor.PingMonitorApp()
+        restored_window = fping_linux.PingMonitorApp()
         self.assertFalse(restored_window._is_dark)
         self.assertEqual(restored_window.theme_btn.text(), "☀")
         restored_window.close()
@@ -156,7 +156,7 @@ class PingMonitorAppTests(unittest.TestCase):
 
         data = self.window.host_data[target]
         self.assertEqual(list(data["latencies"]), [20.0, 30.0])
-        self.assertEqual(ping_monitor.PingMonitorApp._compute_host_stats(data)[3:], (10.0, 30.0, 20.0))
+        self.assertEqual(fping_linux.PingMonitorApp._compute_host_stats(data)[3:], (10.0, 30.0, 20.0))
 
         self.window._handle_probe_result(3, target, ProbeResult("Connected", 40.0))
         self.assertEqual(data["sent"], 3)
@@ -173,8 +173,8 @@ class PingMonitorAppTests(unittest.TestCase):
             task.signals.finished.emit(task.run_id)
 
         self.window.probe_pool.start = emit_probe_result
-        with patch.object(ping_monitor.sys, "platform", "linux"), patch(
-            "ping_monitor.fping_available", return_value=True
+        with patch.object(fping_linux.sys, "platform", "linux"), patch(
+            "fping_linux.fping_available", return_value=True
         ):
             self.window.toggle_monitoring()
 

@@ -3,7 +3,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from probes import (
+from fping_linux_probes import (
     ProbeResult,
     fping_available,
     fping_info,

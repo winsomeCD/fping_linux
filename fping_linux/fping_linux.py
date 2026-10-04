@@ -23,7 +23,7 @@ from PySide6.QtWidgets import (
     QTableWidget, QTableWidgetItem, QLineEdit, QDialog, QTextEdit,
     QPushButton, QSpinBox, QDoubleSpinBox, QFrame, QMessageBox,
 )
-from probes import ProbeResult, ProbeTask, fping_available, normalize_targets
+from fping_linux_probes import ProbeResult, ProbeTask, fping_available, normalize_targets
 
 
 class SortableTableWidgetItem(QTableWidgetItem):
@@ -359,11 +359,12 @@ class CardFrame(QFrame):
 # ---------------------------------------------------------------------------
 class PingMonitorApp(QMainWindow):
     PACKET_SIZE_BYTES = 56
-    PING_INTERVAL_SECONDS = 1.0
+    PING_INTERVAL_SECONDS = 2.0
+    SEND_GAP_MS = 10
     GRAPH_HISTORY_POINTS = 60
     TIMEOUT_SECONDS = 2.0
     MAX_LOG_ENTRIES = 1000
-    CONFIG_FILE = Path(__file__).resolve().with_name("ping_monitor_config.json")
+    CONFIG_FILE = Path(__file__).resolve().with_name("fping_linux_config.json")
 
     def __init__(self):
         super().__init__()
@@ -381,6 +382,7 @@ class PingMonitorApp(QMainWindow):
 
         self.packet_size_bytes = self.PACKET_SIZE_BYTES
         self.ping_interval_seconds = self.PING_INTERVAL_SECONDS
+        self.send_gap_ms = self.SEND_GAP_MS
         self.graph_history_points = self.GRAPH_HISTORY_POINTS
         self.timeout_seconds = self.TIMEOUT_SECONDS
 
@@ -482,9 +484,25 @@ class PingMonitorApp(QMainWindow):
         settings_row = QHBoxLayout()
         settings_row.setSpacing(12)
 
+        send_gap_col = QVBoxLayout()
+        send_gap_col.setSpacing(3)
+        send_gap_lbl = QLabel("GLOBAL SEND GAP (-i)")
+        send_gap_lbl.setObjectName("sectionCaption")
+        send_gap_col.addWidget(send_gap_lbl)
+        self.send_gap_spin = QSpinBox()
+        self.send_gap_spin.setRange(1, 1000)
+        self.send_gap_spin.setValue(self.SEND_GAP_MS)
+        self.send_gap_spin.setSuffix(" ms")
+        self.send_gap_spin.setMinimumWidth(120)
+        self.send_gap_spin.setToolTip(
+            "Minimum gap between packets to any target. Lower values send the host list faster; 1 ms is the fping minimum."
+        )
+        send_gap_col.addWidget(self.send_gap_spin)
+        settings_row.addLayout(send_gap_col)
+
         pkt_col = QVBoxLayout()
         pkt_col.setSpacing(3)
-        pkt_lbl = QLabel("PACKET SIZE")
+        pkt_lbl = QLabel("PAYLOAD SIZE (-b)")
         pkt_lbl.setObjectName("sectionCaption")
         pkt_col.addWidget(pkt_lbl)
         self.packet_spin = QSpinBox()
@@ -498,16 +516,19 @@ class PingMonitorApp(QMainWindow):
 
         int_col = QVBoxLayout()
         int_col.setSpacing(3)
-        int_lbl = QLabel("INTERVAL")
+        int_lbl = QLabel("HOST PERIOD (-p)")
         int_lbl.setObjectName("sectionCaption")
         int_col.addWidget(int_lbl)
         self.interval_spin = QDoubleSpinBox()
         self.interval_spin.setRange(0.1, 3600.0)
         self.interval_spin.setDecimals(1)
         self.interval_spin.setSingleStep(0.1)
-        self.interval_spin.setValue(1.0)
+        self.interval_spin.setValue(self.PING_INTERVAL_SECONDS)
         self.interval_spin.setSuffix(" s")
         self.interval_spin.setMinimumWidth(110)
+        self.interval_spin.setToolTip(
+            "Repeat interval for each host. It must be at least as long as the timeout (-t)."
+        )
         int_col.addWidget(self.interval_spin)
         settings_row.addLayout(int_col)
 
@@ -523,8 +544,11 @@ class PingMonitorApp(QMainWindow):
         self.timeout_spin.setValue(2.0)
         self.timeout_spin.setSuffix(" s")
         self.timeout_spin.setMinimumWidth(110)
+        self.timeout_spin.setToolTip("Maximum wait for each host reply (-t). The host period is kept at least this long.")
         timeout_col.addWidget(self.timeout_spin)
         settings_row.addLayout(timeout_col)
+        self.interval_spin.setMinimum(self.timeout_spin.value())
+        self.timeout_spin.valueChanged.connect(self._sync_host_period_minimum)
 
         hist_col = QVBoxLayout()
         hist_col.setSpacing(3)
@@ -1107,6 +1131,7 @@ class PingMonitorApp(QMainWindow):
             "packet_size": self.packet_spin.value(),
             "interval": self.interval_spin.value(),
             "timeout": self.timeout_spin.value(),
+            "send_gap_ms": self.send_gap_spin.value(),
             "history_points": self.history_spin.value(),
             "dark_theme": self._is_dark,
         }
@@ -1151,8 +1176,9 @@ class PingMonitorApp(QMainWindow):
             pending_values = {}
             for key, control, integer_only in (
                 ("packet_size", self.packet_spin, True),
-                ("interval", self.interval_spin, False),
                 ("timeout", self.timeout_spin, False),
+                ("interval", self.interval_spin, False),
+                ("send_gap_ms", self.send_gap_spin, True),
                 ("history_points", self.history_spin, True),
             ):
                 if key not in config:
@@ -1164,13 +1190,18 @@ class PingMonitorApp(QMainWindow):
                     raise ValueError(f"The '{key}' setting must be an integer.")
                 if not math.isfinite(value):
                     raise ValueError(f"The '{key}' setting must be finite.")
-                minimum = control.minimum()
+                minimum = 0.1 if key == "interval" else control.minimum()
                 maximum = control.maximum()
                 if value < minimum or value > maximum:
                     raise ValueError(
                         f"The '{key}' setting must be between {minimum} and {maximum}."
                     )
                 pending_values[key] = value
+
+            effective_timeout = pending_values.get("timeout", self.timeout_spin.value())
+            effective_interval = pending_values.get("interval", self.interval_spin.value())
+            if effective_interval < effective_timeout:
+                pending_values["interval"] = effective_timeout
 
             dark_theme = self._is_dark
             if "dark_theme" in config:
@@ -1185,8 +1216,9 @@ class PingMonitorApp(QMainWindow):
             for key, value in pending_values.items():
                 {
                     "packet_size": self.packet_spin,
-                    "interval": self.interval_spin,
                     "timeout": self.timeout_spin,
+                    "interval": self.interval_spin,
+                    "send_gap_ms": self.send_gap_spin,
                     "history_points": self.history_spin,
                 }[key].setValue(value)
             self._is_dark = dark_theme
@@ -1196,6 +1228,10 @@ class PingMonitorApp(QMainWindow):
             self.chart.update()
         except (OSError, json.JSONDecodeError, OverflowError, TypeError, ValueError) as error:
             self.config_warning = str(error)
+
+    def _sync_host_period_minimum(self, _value=None):
+        """Keep fping's per-host repeat period no shorter than its timeout."""
+        self.interval_spin.setMinimum(self.timeout_spin.value())
 
     # ------------------------------------------------------------------ Monitoring
     def toggle_monitoring(self):
@@ -1238,6 +1274,7 @@ class PingMonitorApp(QMainWindow):
 
         self.packet_size_bytes = self.packet_spin.value()
         self.ping_interval_seconds = self.interval_spin.value()
+        self.send_gap_ms = self.send_gap_spin.value()
         self.graph_history_points = self.history_spin.value()
         self.timeout_seconds = self.timeout_spin.value()
 
@@ -1297,6 +1334,7 @@ class PingMonitorApp(QMainWindow):
             payload_size=self.packet_size_bytes,
             timeout=self.timeout_seconds,
             interval=self.ping_interval_seconds,
+            send_gap_ms=self.send_gap_ms,
         )
         task.signals.completed.connect(self._handle_probe_result)
         task.signals.finished.connect(self._handle_probe_task_finished)
@@ -1314,7 +1352,7 @@ class PingMonitorApp(QMainWindow):
             self.start_btn.setText("Stopping…")
             self.start_btn.setEnabled(False)
             self.status_pill.setText("STOPPING")
-            self.footer_label.setText("Finishing current probes…")
+            self.footer_label.setText("Stopping fping and closing outstanding probes…")
         else:
             self._finalize_stop()
 
@@ -1441,6 +1479,7 @@ class PingMonitorApp(QMainWindow):
         self.packet_spin.setEnabled(enabled)
         self.interval_spin.setEnabled(enabled)
         self.timeout_spin.setEnabled(enabled)
+        self.send_gap_spin.setEnabled(enabled)
         self.history_spin.setEnabled(enabled)
 
     @Slot(str, object)
@@ -1771,7 +1810,7 @@ class PingMonitorApp(QMainWindow):
             self._msg(
                 "XLSX Export Unavailable",
                 "Install the project dependencies to enable Excel export:\n"
-                "python -m pip install -r requirements.txt",
+                "python -m pip install -r requirements_fping_linux.txt",
                 QMessageBox.Warning,
             )
             return

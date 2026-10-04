@@ -1,8 +1,9 @@
 {
   "hosts": "",
   "packet_size": 56,
-  "interval": 1.0,
+  "interval": 2.0,
   "timeout": 2.0,
+  "send_gap_ms": 10,
   "history_points": 60,
   "dark_theme": false
 }
