@@ -1,0 +1,8 @@
+{
+  "hosts": "",
+  "packet_size": 56,
+  "interval": 1.0,
+  "timeout": 2.0,
+  "history_points": 60,
+  "dark_theme": false
+}
