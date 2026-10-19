@@ -1,0 +1,51 @@
+# Environments
+.venv/
+venv/
+env/
+ENV/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Node / JS dependencies
+node_modules/
+dist/
+build/
+.npm/
+
+# IDE and OS
+.DS_Store
+Thumbs.db
+*.swp
+*.bak
+.vscode/
+
+# Other workspace projects (kept local, not tracked in fping_linux repo)
+Day1-html/
+day2-about-me/
+day5-card-site/
+day8-to-do-app/
+day9-weather/
+day10-landing-page/
+day12-ai-assistant/
+ssh_automation/
+ping_monitor/
+tests/
+30-day-vibe-coding-plan.md
+Online-learning-implementation-plan
+network-monitoring-platform-brainstorm.md
+
+# Agents and local skills (kept local)
+.agents/
+AntigravitySkills/
+
+# Generated reports and screenshots
+network_report_*
+fping_linux/network_report_*
+fping_linux/*.png
+ui_redesign_*.png
+font_test.png
+current_ui.png

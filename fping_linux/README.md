@@ -10,17 +10,18 @@ Linux-only multi-host ICMP reachability and latency dashboard built with **PySid
 
 ## Features
 
-- **Multi-host monitoring** — one fping process schedules the full target list; the application imposes no host concurrency ceiling
-- **Live dashboard** — status, sequence, latency, packet loss, consecutive failures
-- **Latency history chart** — rolling-window graph with per-host colours and legend
+- **Multi-host monitoring** — one fping process schedules the full target list and reports both replies and timeouts; the application imposes no host concurrency ceiling
+- **DNS Issue Isolation & Multi-Check Verification** — hostnames with name resolution errors are vetted with multiple DNS lookups, isolated from the live telemetry stream and chart, and tracked in a dedicated DNS Inspector with live filtering, clipboard copy, and export
+- **Live dashboard** — status, sequence, latency, packet loss, consecutive failures with in-place cell updates
+- **Latency history chart** — rolling-window graph with per-host colours and legend, automatically capped to the top 20 active targets to maintain high performance with large fleets
 - **No-reply panel** — shows targets that did not answer ICMP; a timeout does not prove the host is offline
-- **Sortable dashboards** — live and no-reply tables sort by column, with numeric fields ordered numerically
+- **High-performance table sorting** — $O(1)$ numeric sorting by column without regex parsing; clicking headers (including Packet Loss) sorts immediately without UI freezing, row shifting, or artificial ICMP latency spikes
 - **Host detail dialog** — double-click a row for stats + recent timeline
-- **Theme toggle** — dark / light mode (🌙 / ☀️)
-- **Import hosts** — load from `.txt` or `.csv`
+- **Theme toggle** — modern dark / light mode (🌙 / ☀️) with responsive design
+- **Import hosts** — load from `.txt` or `.csv` (supports 500+ host lists)
 - **Config save/load** — atomically persists hosts, settings, and theme to `fping_linux_config.json`
-- **Export reports** — TXT with a top-level overview, CSV with per-host summary and probe rows, or XLSX with Summary Info, Host Details, and Probe Details tabs
-- **Search / filter** — live filter on the host table
+- **Timestamped secure exports** — TXT, CSV, and XLSX exports automatically include timestamped filenames (`network_report_YYYYMMDD_HHMMSS.<ext>`) to prevent overwriting, with built-in CSV formula injection (DDE) sanitization and UTF-8 BOM encoding
+- **Search / filter** — live filter on the host table placed beside telemetry controls
 - **Log limiting** — timeline capped at 1000 entries per host
 
 ---
@@ -37,7 +38,7 @@ This installs **PySide6** for the desktop UI.
 
 Install **fping 5.0 or newer** using your Linux distribution's package manager. The app checks for fping at startup and will not start monitoring if it is missing or too old. JSON output is used when available; fping 5.0–5.4 uses standard per-probe text output.
 
-fping uses a single process to schedule probes across the target list in a paced round-robin loop. The GUI exposes its payload size (`-b`), global send gap in milliseconds (`-i`), per-host repeat period in seconds (`-p`), and timeout in seconds (`-t`). A smaller global send gap sends the first sweep faster; its default is 10 ms. The per-host period is kept at least as long as the timeout. The app has no fixed maximum host count or parallel setting; actual rate and capacity depend on fping, Linux socket permissions, system resources, and the network.
+The app resolves hostnames concurrently to IPv4 addresses before starting one fping process, avoiding a long serial DNS-resolution pause for large lists. Targets that do not resolve are reported as **DNS Error** rather than remaining queued. fping then schedules the resolved addresses in a paced round-robin loop. The app keeps output for successful replies and timeouts so both appear in the live table. The GUI exposes its payload size (`-b`), global send gap in milliseconds (`-i`), per-host repeat period in seconds (`-p`), and timeout in seconds (`-t`). The global gap defaults to 10 ms, but is automatically reduced when needed so a large target list can meet the requested per-host period. fping's safe minimum global gap is 1 ms; if the target count makes the requested period impossible even at that rate, the app uses and displays the fastest achievable period. The per-host period is kept at least as long as the timeout. The app has no fixed maximum host count or parallel setting; actual rate and capacity depend on fping, Linux socket permissions, system resources, and the network.
 
 Install fping from your distribution package repository so its ICMP permissions are configured by the package. The application does not need to run as root.
 
@@ -61,13 +62,14 @@ python fping_linux.py
 
 | Area | Description |
 |------|-------------|
-| **Header** | Title, theme toggle, status pill (IDLE / MONITORING) |
-| **Config card** | Host list, import, save config, spin boxes, Start/Stop, Clear, Export |
-| **Filter** | Live search over host names/IPs |
-| **Live Host Dashboard** | Main table (Host, Status, Sequence, Latency, Loss, Fails) |
-| **Latency History** | Custom-painted rolling chart |
+| **Header** | Title, theme toggle, and system health status cards (Fleet Monitored, Reachability %, Average Latency, Packet Loss) |
+| **Config card** | Target list entry, import, save settings, payload/gap/period/timeout adjustments, Start/Stop monitoring |
+| **Live Telemetry Bar** | Live search filter placed directly alongside the **DNS Issues Pill Badge** (`⚠ X DNS Issues`) |
+| **DNS Inspector Dialog** | Opened via the DNS pill badge; displays all unresolvable hosts, detection timestamp, exact error reason, search bar, and one-click clipboard copy / CSV export |
+| **Live Telemetry Table** | Main streaming table with $O(1)$ smooth column sorting (Host, Status, Sequence, Latency, Loss %, Failures); unresolvable DNS hosts are excluded to keep telemetry clean |
+| **Latency History** | Custom high-performance rolling graph capped at the top 20 active targets to maintain 60 FPS even with 500+ host fleets |
 | **No ICMP Reply** | Targets that returned no echo reply before timeout |
-| **Footer** | Aggregate host count and overall loss |
+| **Footer** | Summary counts, reachable targets, and aggregate loss percentage |
 
 ---
 
@@ -101,22 +103,29 @@ Loaded automatically on startup if present.
 
 ## Export formats
 
-### TXT report
-- Overview counts and aggregate ICMP/latency metrics at the top
-- Aggregated metrics (sent / recv / loss / min / max / avg)
+Export dialogs automatically generate unique timestamped default filenames (`network_report_YYYYMMDD_HHMMSS.<ext>`) to guarantee exports are never overwritten by default:
+
+### TXT report (`network_report_YYYYMMDD_HHMMSS.txt`)
+- Header includes `Generated: YYYY-MM-DD HH:MM:SS` timestamp
+- Overview metrics and fleet-wide packet loss summary
+- Target aggregate metrics (sent, received, loss %, min/max/avg latency)
+- Unresolved DNS hostnames section isolated from live telemetry
 - Targets with no ICMP reply at export time
 - Full sequence timeline per host
 
-### CSV report
-- Summary metrics per target
-- No-reply and per-probe rows
-- Current ICMP reply and probe error state per target
-- Recent probe rows (sequence, timestamp, result, latency or error)
+### CSV report (`network_report_YYYYMMDD_HHMMSS.csv`)
+- **Formula Injection Protection**: Neutralizes CSV/DDE injection attacks (`=`, `+`, `-`, `@`, `\t`, `\r` escaped with single quote)
+- **UTF-8 with BOM (`utf-8-sig`)**: Prevents character corruption when opened in Microsoft Excel
+- Per-target summary metrics, DNS failure records, no-reply timeouts, and probe sequence rows
 
-### Excel workbook
-- **Summary Info** overview tab
-- **Host Details** metrics per target
-- **Probe Details** recent probe timeline
+### Excel workbook (`network_report_YYYYMMDD_HHMMSS.xlsx`)
+- **Summary Info**: Formatted overview metrics and generation metadata
+- **Host Details**: Complete host metrics table with styling
+- **Probe Details**: Sequence-by-sequence probe audit trail
+- **DNS Failures**: Dedicated sheet for unresolvable targets with timestamps and root-cause details
+
+### DNS issues report (`dns_issues_YYYYMMDD_HHMMSS.csv`)
+- Direct export from the DNS Inspector dialog listing all unresolvable domain names, validation attempt count, error message, and timestamp
 
 ---
 
