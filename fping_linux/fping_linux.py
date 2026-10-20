@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Ping Check Enhanced - Multi-Host Network Monitor (Pure PySide6)
-Professional Desktop Edition
+fping Linux Enhanced - High-Performance Multi-Host Network Monitor (Pure PySide6)
+Native Linux fping Edition
 """
 
 import csv
@@ -947,7 +947,7 @@ class PingMonitorApp(QMainWindow):
         self.graph_history_points = self.GRAPH_HISTORY_POINTS
         self.timeout_seconds = self.TIMEOUT_SECONDS
 
-        self.setWindowTitle("Ping Check — Professional Network Monitor")
+        self.setWindowTitle("fping Linux — Professional Network Monitor")
         screen = QApplication.primaryScreen()
         if screen is not None:
             available = screen.availableGeometry()
@@ -984,11 +984,11 @@ class PingMonitorApp(QMainWindow):
 
         title_col = QVBoxLayout()
         title_col.setSpacing(2)
-        self.title_label = QLabel("PING CHECK TELEMETRY")
+        self.title_label = QLabel("FPING LINUX TELEMETRY")
         self.title_label.setObjectName("appTitle")
         self.title_label.setTextFormat(Qt.PlainText)
 
-        self.subtitle_label = QLabel("Low-overhead asynchronous ICMP reachability engine & network diagnostic console")
+        self.subtitle_label = QLabel("Native fping asynchronous ICMP reachability engine & Linux diagnostic console")
         self.subtitle_label.setObjectName("appSubtitle")
         self.subtitle_label.setTextFormat(Qt.PlainText)
 
@@ -1036,7 +1036,7 @@ class PingMonitorApp(QMainWindow):
         config_layout.setContentsMargins(16, 14, 16, 14)
         config_layout.setSpacing(10)
 
-        section = QLabel("TARGET FLEET SPECIFICATION")
+        section = QLabel("FPING TARGET FLEET SPECIFICATION")
         section.setObjectName("targetConfigurationCaption")
         section.setTextFormat(Qt.PlainText)
         config_layout.addWidget(section)
@@ -1179,7 +1179,7 @@ class PingMonitorApp(QMainWindow):
         self.export_txt_btn.setObjectName("secondaryBtn")
         btn_box.addWidget(self.export_txt_btn)
 
-        self.start_btn = QPushButton("▶ Start Monitoring")
+        self.start_btn = QPushButton("▶ Start fping")
         self.start_btn.setObjectName("primaryBtn")
         self.start_btn.setFixedHeight(34)
         self.start_btn.clicked.connect(self.toggle_monitoring)
@@ -1202,7 +1202,7 @@ class PingMonitorApp(QMainWindow):
         top = QHBoxLayout()
         top.setContentsMargins(0, 0, 0, 0)
         top.setSpacing(10)
-        dash_title = QLabel("LIVE TELEMETRY STREAM")
+        dash_title = QLabel("FPING TELEMETRY STREAM")
         dash_title.setObjectName("strongLabel")
         dash_title.setTextFormat(Qt.PlainText)
         top.addWidget(dash_title)
@@ -1343,11 +1343,11 @@ class PingMonitorApp(QMainWindow):
         if self.is_monitoring:
             primary = "#e11d48"
             primary_hover = "#be123c"
-            btn_text = "■ Stop Monitoring"
+            btn_text = "■ Stop fping"
         else:
             primary = "#2563eb"
             primary_hover = "#1d4ed8"
-            btn_text = "▶ Start Monitoring"
+            btn_text = "▶ Start fping"
         self.start_btn.setText(btn_text)
 
         qss = f"""
@@ -2150,7 +2150,7 @@ class PingMonitorApp(QMainWindow):
         self._stop_pending = False
         self.host_count_label.setText(f"0 up / {len(self.host_data)} total")
         self.set_controls_enabled(False)
-        self.start_btn.setText("Stop Monitoring")
+        self.start_btn.setText("■ Stop fping")
         self.apply_style()
         self._set_status_running()
         self.export_txt_btn.setEnabled(False)
@@ -2178,7 +2178,7 @@ class PingMonitorApp(QMainWindow):
         if self.probe_task is not None:
             self.probe_task.request_stop()
             self.set_controls_enabled(False)
-            self.start_btn.setText("Stopping…")
+            self.start_btn.setText("Stopping fping…")
             self.start_btn.setEnabled(False)
             self._set_status_stopping()
             self.footer_label.setText("Stopping fping and closing outstanding probes…")
@@ -2190,7 +2190,7 @@ class PingMonitorApp(QMainWindow):
         self.probe_task = None
         self.set_controls_enabled(True)
         self.start_btn.setEnabled(True)
-        self.start_btn.setText("Start Monitoring")
+        self.start_btn.setText("▶ Start fping")
         self.apply_style()
         self._set_status_idle()
         self.export_txt_btn.setEnabled(bool(self.host_data))
@@ -2626,11 +2626,11 @@ class PingMonitorApp(QMainWindow):
             for d in self.host_data.values()
         )
         state = (
-            f"Monitoring (-p {self.effective_period_ms / 1000:g}s / "
+            f"fping Active (-p {self.effective_period_ms / 1000:g}s / "
             f"-i {self.effective_send_gap_ms}ms)"
             if self.is_monitoring and total_sent
             else (
-                f"Starting (-p {self.effective_period_ms / 1000:g}s / "
+                f"Starting fping (-p {self.effective_period_ms / 1000:g}s / "
                 f"-i {self.effective_send_gap_ms}ms)"
                 if self.is_monitoring
                 else "Stopped"
@@ -2823,7 +2823,7 @@ class PingMonitorApp(QMainWindow):
             summary_sheet = workbook.active
             summary_sheet.title = "Summary Info"
             summary_sheet.merge_cells("A1:B1")
-            summary_sheet["A1"] = "Ping Monitor Summary Info"
+            summary_sheet["A1"] = "fping Linux Summary Info"
             summary_sheet["A1"].font = Font(size=16, bold=True, color="FFFFFF")
             summary_sheet["A1"].fill = PatternFill("solid", fgColor="17365D")
             summary_sheet["A1"].alignment = Alignment(vertical="center")
@@ -2993,11 +2993,14 @@ class PingMonitorApp(QMainWindow):
 
 
 # ---------------------------------------------------------------------------
-# Main
+# Aliases & Main
 # ---------------------------------------------------------------------------
+FpingLinuxApp = PingMonitorApp
+
+
 def main():
     app = QApplication(sys.argv)
-    app.setApplicationName("Ping Check Enhanced")
+    app.setApplicationName("fping Linux Enhanced")
     app.setFont(QFont("Segoe UI", 9))
 
     warn_text = None
