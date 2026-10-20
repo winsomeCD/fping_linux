@@ -3,6 +3,7 @@
 import asyncio
 import ipaddress
 import json
+import os
 import re
 import shutil
 import socket
@@ -146,30 +147,37 @@ class DNSResolver:
             loop = asyncio.get_running_loop()
             last_err: Exception | None = None
 
+            per_check_timeout = 2.5
             for attempt in range(1, max_attempts + 1):
                 try:
                     # Check 1: IPv4
-                    lookup = await loop.getaddrinfo(
-                        target, None, family=socket.AF_INET, type=socket.SOCK_DGRAM
+                    lookup = await asyncio.wait_for(
+                        loop.getaddrinfo(
+                            target, None, family=socket.AF_INET, type=socket.SOCK_DGRAM
+                        ),
+                        timeout=per_check_timeout,
                     )
                     ip = lookup[0][4][0]
                     self._cache[target] = (ip, now + self.ttl)
                     self._negative_cache.pop(target, None)
                     self._resolution_info[target] = (attempt, None)
                     return ip
-                except OSError as e4:
+                except (OSError, asyncio.TimeoutError) as e4:
                     try:
                         # Check 2: IPv6 fallback
-                        lookup = await loop.getaddrinfo(
-                            target, None, family=socket.AF_INET6, type=socket.SOCK_DGRAM
+                        lookup = await asyncio.wait_for(
+                            loop.getaddrinfo(
+                                target, None, family=socket.AF_INET6, type=socket.SOCK_DGRAM
+                            ),
+                            timeout=per_check_timeout,
                         )
                         ip = lookup[0][4][0]
                         self._cache[target] = (ip, now + self.ttl)
                         self._negative_cache.pop(target, None)
                         self._resolution_info[target] = (attempt, None)
                         return ip
-                    except OSError as e6:
-                        last_err = e4 or e6
+                    except (OSError, asyncio.TimeoutError) as e6:
+                        last_err = e4 if isinstance(e4, OSError) else e6
                         if attempt < max_attempts:
                             await asyncio.sleep(delay * attempt)
 
@@ -199,10 +207,7 @@ class DNSResolver:
 
         async def _resolve_safe(target: str) -> tuple[str, str | None]:
             try:
-                ip = await asyncio.wait_for(
-                    self.resolve(target, retries=max_attempts),
-                    timeout=max(4.0, self.retry_delay * max_attempts * 3.0 + 2.0),
-                )
+                ip = await self.resolve(target, retries=max_attempts)
                 return target, ip
             except Exception:
                 return target, None
@@ -353,7 +358,7 @@ class AsyncICMPSession:
         self._pending_v4: dict[tuple[int, int], tuple[asyncio.Future, float]] = {}
         self._pending_v6: dict[tuple[int, int], tuple[asyncio.Future, float]] = {}
         self._seq = 0
-        self._id = 12345
+        self._id = (os.getpid() ^ int(time.time() * 1000)) & 0xFFFF or 12345
         self._receiver_tasks: list[asyncio.Task] = []
         self._stop_event: asyncio.Event | None = None
         self._is_active = False
@@ -374,6 +379,10 @@ class AsyncICMPSession:
             self._v4_sock = socket.socket(socket.AF_INET, socket.SOCK_RAW, socket.IPPROTO_ICMP)
             self._v4_sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4 * 1024 * 1024)
             self._v4_sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 1024 * 1024)
+            try:
+                self._v4_sock.bind(("", 0))
+            except OSError:
+                pass
             self._v4_sock.setblocking(False)
         except OSError:
             self._v4_sock = None
@@ -382,6 +391,10 @@ class AsyncICMPSession:
             self._v6_sock = socket.socket(socket.AF_INET6, socket.SOCK_RAW, socket.IPPROTO_ICMPV6)
             self._v6_sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4 * 1024 * 1024)
             self._v6_sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 1024 * 1024)
+            try:
+                self._v6_sock.bind(("::", 0))
+            except OSError:
+                pass
             self._v6_sock.setblocking(False)
         except OSError:
             self._v6_sock = None

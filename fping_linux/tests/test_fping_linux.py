@@ -197,6 +197,30 @@ class TestDNSResolver(unittest.TestCase):
 
         asyncio.run(_test())
 
+    def test_pre_resolve_large_fleet_does_not_timeout_in_queue(self):
+        """Verify that a fleet with many domains waiting in the semaphore queue does not prematurely time out."""
+        resolver = DNSResolver(max_concurrent=5, retries=2, retry_delay=0.01)
+
+        async def _test():
+            loop = asyncio.get_running_loop()
+            orig_getaddrinfo = loop.getaddrinfo
+
+            async def mock_getaddrinfo(host, port, *args, **kwargs):
+                await asyncio.sleep(0.01)
+                return [(None, None, None, None, ("192.0.2.1", 0))]
+
+            loop.getaddrinfo = mock_getaddrinfo
+            try:
+                targets = [f"queued_host_{i}.lan" for i in range(40)]
+                resolved = await resolver.pre_resolve_all(targets)
+                self.assertEqual(len(resolved), 40)
+                for target in targets:
+                    self.assertEqual(resolved[target], "192.0.2.1")
+            finally:
+                loop.getaddrinfo = orig_getaddrinfo
+
+        asyncio.run(_test())
+
 
 class TestSortableTableWidgetItem(unittest.TestCase):
     def test_numeric_sorting(self):
