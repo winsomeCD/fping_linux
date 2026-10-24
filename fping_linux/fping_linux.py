@@ -17,7 +17,7 @@ from collections import deque
 from pathlib import Path
 
 from PySide6.QtCore import Qt, Slot, QTimer, QPointF, QRectF, QThreadPool
-from PySide6.QtGui import QBrush, QColor, QFont, QPainter, QPen, QLinearGradient, QPainterPath
+from PySide6.QtGui import QBrush, QColor, QFont, QPainter, QPen, QLinearGradient, QPainterPath, QFontDatabase
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QLabel, QVBoxLayout, QHBoxLayout,
     QGridLayout, QSplitter, QFileDialog, QAbstractItemView, QHeaderView,
@@ -48,6 +48,21 @@ def _sanitize_csv_cell(value: object) -> object:
         except ValueError:
             return "'" + text
     return value
+
+
+def _ensure_system_fonts():
+    """Ensure standard system fonts are loaded in headless / offscreen QPA environments."""
+    if not QFontDatabase.families():
+        import platform
+        if platform.system() == "Windows":
+            fonts_dir = Path(os.environ.get("WINDIR", "C:\\Windows")) / "Fonts"
+            for font_file in (
+                "segoeui.ttf", "segoeuib.ttf", "segoeuii.ttf",
+                "seguisym.ttf", "consola.ttf", "consolab.ttf", "arial.ttf"
+            ):
+                p = fonts_dir / font_file
+                if p.exists():
+                    QFontDatabase.addApplicationFont(str(p))
 
 
 class SortableTableWidgetItem(QTableWidgetItem):
@@ -108,7 +123,7 @@ class HostDetailDialog(QDialog):
         self.data = data
         self._dark = dark
         self.setWindowTitle(f"Host Inspection — {host}")
-        self.resize(660, 540)
+        self.resize(680, 560)
         self._build_ui()
         self._apply_style()
 
@@ -117,13 +132,55 @@ class HostDetailDialog(QDialog):
         layout.setContentsMargins(22, 22, 22, 22)
         layout.setSpacing(14)
 
-        header = QLabel(f"Target: {self.host}")
+        # Header Row with Target and Status Capsule
+        header_row = QHBoxLayout()
+        header_row.setSpacing(10)
+
+        target_badge = QLabel("TARGET")
+        target_badge.setObjectName("badgeLabel")
+        target_badge.setTextFormat(Qt.PlainText)
+        header_row.addWidget(target_badge)
+
+        header = QLabel(self.host)
         header.setTextFormat(Qt.PlainText)
         header.setObjectName("detailTitle")
-        layout.addWidget(header)
+        header_row.addWidget(header, 1)
 
-        stats_layout = QGridLayout()
+        status = self.data.get("last_status", "Unknown")
+        if status == "Connected":
+            status_color = "#10b981"
+            status_bg = "rgba(16, 185, 129, 0.12)" if self._dark else "#dcfce7"
+            status_border = "rgba(16, 185, 129, 0.35)" if self._dark else "#86efac"
+        elif status in ("Queued", "Idle", None):
+            status_color = "#94a3b8"
+            status_bg = "rgba(148, 163, 184, 0.12)" if self._dark else "#f1f5f9"
+            status_border = "rgba(148, 163, 184, 0.30)" if self._dark else "#cbd5e1"
+        elif status in ("No ICMP Reply", "DNS Error"):
+            status_color = "#f59e0b"
+            status_bg = "rgba(245, 158, 11, 0.12)" if self._dark else "#fef3c7"
+            status_border = "rgba(245, 158, 11, 0.35)" if self._dark else "#fde68a"
+        else:
+            status_color = "#f43f5e"
+            status_bg = "rgba(244, 63, 94, 0.12)" if self._dark else "#ffe4e6"
+            status_border = "rgba(244, 63, 94, 0.35)" if self._dark else "#fecdd3"
+
+        status_pill = QLabel(f"● {status}")
+        status_pill.setTextFormat(Qt.PlainText)
+        status_pill.setStyleSheet(
+            f"background: {status_bg}; color: {status_color}; border: 1px solid {status_border}; "
+            "border-radius: 6px; font-weight: 700; font-size: 11px; padding: 4px 12px; "
+            'font-family: "Segoe UI", system-ui, sans-serif;'
+        )
+        header_row.addWidget(status_pill)
+        layout.addLayout(header_row)
+
+        # Metric Stats Cards (2x4 Grid with clean elevated containers)
+        stats_frame = QFrame()
+        stats_frame.setObjectName("detailStatsFrame")
+        stats_layout = QGridLayout(stats_frame)
+        stats_layout.setContentsMargins(12, 12, 12, 12)
         stats_layout.setSpacing(10)
+
         sent = self.data.get("sent", 0)
         received = self.data.get("received", 0)
         loss_pct = round(((sent - received) / sent) * 100, 1) if sent > 0 else None
@@ -139,54 +196,57 @@ class HostDetailDialog(QDialog):
                 ("Min Latency", f"{min(valid_latencies):.2f} ms"),
                 ("Max Latency", f"{max(valid_latencies):.2f} ms"),
                 ("Avg Latency", f"{sum(valid_latencies) / len(valid_latencies):.2f} ms"),
+                ("Jitter Spread", f"{max(valid_latencies) - min(valid_latencies):.2f} ms"),
             ])
+        else:
+            stats.extend([
+                ("Min Latency", "—"),
+                ("Max Latency", "—"),
+                ("Avg Latency", "—"),
+                ("Jitter Spread", "—"),
+            ])
+
         for i, (label, value) in enumerate(stats):
-            row, col = i // 2, (i % 2) * 2
-            lbl = QLabel(f"{label}:")
+            row, col = i // 4, i % 4
+            cell = QFrame()
+            cell.setObjectName("detailStatCell")
+            cell_layout = QVBoxLayout(cell)
+            cell_layout.setContentsMargins(10, 8, 10, 8)
+            cell_layout.setSpacing(3)
+
+            lbl = QLabel(label.upper())
             lbl.setTextFormat(Qt.PlainText)
-            lbl.setObjectName("mutedLabel")
+            lbl.setObjectName("detailStatLabel")
+
             val = QLabel(str(value))
             val.setTextFormat(Qt.PlainText)
-            val.setObjectName("strongLabel")
-            stats_layout.addWidget(lbl, row, col)
-            stats_layout.addWidget(val, row, col + 1)
-        layout.addLayout(stats_layout)
+            val.setObjectName("detailStatValue")
 
-        status = self.data.get("last_status", "Unknown")
-        if status == "Connected":
-            status_color = "#10b981"
-        elif status in ("Queued", "Idle", None):
-            status_color = "#a1a1aa"
-        elif status in ("No ICMP Reply", "DNS Error"):
-            status_color = "#f59e0b"
-        else:
-            status_color = "#f43f5e"
-        status_row = QHBoxLayout()
-        status_label = QLabel("Current Status:")
-        status_label.setTextFormat(Qt.PlainText)
-        status_label.setObjectName("mutedLabel")
-        status_value = QLabel(f"● {status}")
-        status_value.setTextFormat(Qt.PlainText)
-        status_value.setStyleSheet(f"color: {status_color}; font-weight: 700; font-size: 13px;")
-        status_row.addWidget(status_label)
-        status_row.addWidget(status_value)
-        status_row.addStretch()
-        layout.addLayout(status_row)
+            cell_layout.addWidget(lbl)
+            cell_layout.addWidget(val)
+            stats_layout.addWidget(cell, row, col)
+
+        layout.addWidget(stats_frame)
 
         if self.data.get("last_down_time") and self.data.get("last_down_time") != "-":
-            down_lbl = QLabel(f"Last Down Event: {self.data['last_down_time']}")
+            down_banner = QFrame()
+            down_banner.setObjectName("detailDownBanner")
+            down_layout = QHBoxLayout(down_banner)
+            down_layout.setContentsMargins(12, 8, 12, 8)
+            down_lbl = QLabel(f"⚠️ Last Down Event Recorded: {self.data['last_down_time']}")
             down_lbl.setTextFormat(Qt.PlainText)
-            down_lbl.setObjectName("mutedLabel")
-            layout.addWidget(down_lbl)
+            down_lbl.setObjectName("detailDownLabel")
+            down_layout.addWidget(down_lbl)
+            layout.addWidget(down_banner)
 
-        timeline_title = QLabel("Telemetry Log Stream (Last 50):")
+        timeline_title = QLabel("TELEMETRY LOG STREAM (LAST 50 PROBES):")
         timeline_title.setTextFormat(Qt.PlainText)
-        timeline_title.setObjectName("strongLabel")
+        timeline_title.setObjectName("sectionCaption")
         layout.addWidget(timeline_title)
 
         self.log_text = QTextEdit()
         self.log_text.setReadOnly(True)
-        self.log_text.setMaximumHeight(200)
+        self.log_text.setMaximumHeight(210)
         logs = self.data.get("timeline_stats", [])
         self.log_text.setText("\n".join(logs[-50:]) if logs else "No timeline logs available.")
         layout.addWidget(self.log_text)
@@ -203,45 +263,88 @@ class HostDetailDialog(QDialog):
 
     def _apply_style(self):
         dark = self._dark
-        bg = "#09090b" if dark else "#ffffff"
-        surface = "#121215" if dark else "#ffffff"
-        text = "#f4f4f5" if dark else "#09090b"
-        muted = "#a1a1aa" if dark else "#71717a"
-        border = "rgba(255, 255, 255, 0.08)" if dark else "rgba(0, 0, 0, 0.08)"
-        border_highlight = "rgba(255, 255, 255, 0.16)" if dark else "rgba(0, 0, 0, 0.16)"
-        btn_bg = "#18181b" if dark else "#f4f4f5"
+        bg = "#090d16" if dark else "#f8fafc"
+        surface = "#111726" if dark else "#ffffff"
+        cell_bg = "#172033" if dark else "#f1f5f9"
+        text = "#f1f5f9" if dark else "#0f172a"
+        muted = "#94a3b8" if dark else "#64748b"
+        border = "rgba(255, 255, 255, 0.08)" if dark else "rgba(15, 23, 42, 0.08)"
+        border_highlight = "rgba(255, 255, 255, 0.16)" if dark else "rgba(15, 23, 42, 0.16)"
+        btn_bg = "#172033" if dark else "#f1f5f9"
         self.setStyleSheet(f"""
             QDialog {{
                 background-color: {bg};
                 color: {text};
-                font-family: "Inter", "Segoe UI", -apple-system, sans-serif;
+                font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+            }}
+            QLabel#badgeLabel {{
+                background-color: {"rgba(99, 102, 241, 0.12)" if dark else "#e0e7ff"};
+                color: {"#818cf8" if dark else "#4338ca"};
+                border: 1px solid {"rgba(99, 102, 241, 0.35)" if dark else "#c7d2fe"};
+                border-radius: 6px;
+                padding: 3px 8px;
+                font-size: 10px;
+                font-weight: 700;
+                letter-spacing: 0.6px;
             }}
             QLabel#detailTitle {{
                 font-size: 16px;
-                font-weight: 600;
-                letter-spacing: -0.025em;
+                font-weight: 700;
+                letter-spacing: -0.02em;
                 color: {text};
+                font-family: "Consolas", "Courier New", monospace;
                 background: transparent;
             }}
-            QLabel#mutedLabel {{
+            QFrame#detailStatsFrame {{
+                background-color: {surface};
+                border: 1px solid {border};
+                border-radius: 12px;
+            }}
+            QFrame#detailStatCell {{
+                background-color: {cell_bg};
+                border: 1px solid {border};
+                border-radius: 8px;
+            }}
+            QLabel#detailStatLabel {{
                 color: {muted};
-                font-size: 12px;
+                font-size: 10px;
+                font-weight: 600;
+                letter-spacing: 0.5px;
                 background: transparent;
             }}
-            QLabel#strongLabel {{
+            QLabel#detailStatValue {{
                 color: {text};
-                font-weight: 600;
+                font-weight: 700;
+                font-size: 13px;
+                font-family: "Consolas", "Courier New", monospace;
+                background: transparent;
+            }}
+            QFrame#detailDownBanner {{
+                background-color: {"rgba(244, 63, 94, 0.12)" if dark else "#ffe4e6"};
+                border: 1px solid {"rgba(244, 63, 94, 0.35)" if dark else "#fecdd3"};
+                border-radius: 8px;
+            }}
+            QLabel#detailDownLabel {{
+                color: {"#f43f5e" if dark else "#e11d48"};
                 font-size: 12px;
-                font-family: "JetBrains Mono", "Geist Mono", monospace;
+                font-weight: 600;
+                background: transparent;
+            }}
+            QLabel#sectionCaption {{
+                color: {muted};
+                font-size: 10px;
+                font-weight: 600;
+                letter-spacing: 0.5px;
+                text-transform: uppercase;
                 background: transparent;
             }}
             QTextEdit {{
-                background-color: {surface};
-                color: {text};
+                background-color: {"#080b12" if dark else "#ffffff"};
+                color: {"#38bdf8" if dark else "#0369a1"};
                 border: 1px solid {border};
                 border-radius: 8px;
                 padding: 10px;
-                font-family: "JetBrains Mono", "Geist Mono", monospace;
+                font-family: "Consolas", "Courier New", monospace;
                 font-size: 11px;
             }}
             QPushButton#secondaryBtn {{
@@ -250,11 +353,12 @@ class HostDetailDialog(QDialog):
                 border: 1px solid {border};
                 border-radius: 8px;
                 font-weight: 500;
-                padding: 6px 16px;
+                font-size: 12px;
+                padding: 6px 18px;
             }}
             QPushButton#secondaryBtn:hover {{
                 border-color: {border_highlight};
-                background-color: {"#27272a" if dark else "#e4e4e7"};
+                background-color: {"#1e293b" if dark else "#e2e8f0"};
             }}
         """)
 
@@ -551,15 +655,15 @@ class DNSIssuesDialog(QDialog):
 
     def _apply_style(self):
         dark = self._dark
-        bg = "#09090b" if dark else "#ffffff"
-        surface = "#121215" if dark else "#ffffff"
-        elevated = "#18181b" if dark else "#f4f4f5"
-        text = "#f4f4f5" if dark else "#09090b"
-        muted = "#a1a1aa" if dark else "#71717a"
-        border = "rgba(255, 255, 255, 0.08)" if dark else "rgba(0, 0, 0, 0.08)"
-        border_highlight = "rgba(255, 255, 255, 0.16)" if dark else "rgba(0, 0, 0, 0.16)"
-        header_bg = "#18181b" if dark else "#f4f4f5"
-        grid = "rgba(255, 255, 255, 0.04)" if dark else "rgba(0, 0, 0, 0.04)"
+        bg = "#090d16" if dark else "#f8fafc"
+        surface = "#111726" if dark else "#ffffff"
+        elevated = "#172033" if dark else "#f1f5f9"
+        text = "#f1f5f9" if dark else "#0f172a"
+        muted = "#94a3b8" if dark else "#64748b"
+        border = "rgba(255, 255, 255, 0.08)" if dark else "rgba(15, 23, 42, 0.08)"
+        border_highlight = "rgba(255, 255, 255, 0.16)" if dark else "rgba(15, 23, 42, 0.16)"
+        header_bg = "#151c2e" if dark else "#f1f5f9"
+        grid = "rgba(255, 255, 255, 0.04)" if dark else "rgba(15, 23, 42, 0.04)"
         primary = "#6366f1" if dark else "#4f46e5"
         primary_hover = "#4f46e5" if dark else "#4338ca"
 
@@ -567,7 +671,7 @@ class DNSIssuesDialog(QDialog):
             QDialog {{
                 background-color: {bg};
                 color: {text};
-                font-family: "Inter", "Segoe UI", -apple-system, sans-serif;
+                font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
             }}
             QLabel#badgeLabel {{
                 background-color: {"rgba(245, 158, 11, 0.12)" if dark else "#fef3c7"};
@@ -623,7 +727,7 @@ class DNSIssuesDialog(QDialog):
                 border: none;
             }}
             QTableWidget::item:selected {{
-                background-color: {"#18181b" if dark else "#e4e4e7"};
+                background-color: {"#1e293b" if dark else "#e2e8f0"};
                 color: {text};
             }}
             QHeaderView::section {{
@@ -648,7 +752,7 @@ class DNSIssuesDialog(QDialog):
             }}
             QPushButton#secondaryBtn:hover {{
                 border-color: {border_highlight};
-                background-color: {"#27272a" if dark else "#e4e4e7"};
+                background-color: {"#1e293b" if dark else "#e2e8f0"};
             }}
             QPushButton#primaryBtn {{
                 background-color: {primary};
@@ -733,18 +837,18 @@ class LatencyChart(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
         dark = self._dark
-        bg = QColor("#121215" if dark else "#ffffff")
-        title_color = QColor("#a1a1aa" if dark else "#71717a")
-        muted = QColor("#71717a" if dark else "#a1a1aa")
+        bg = QColor("#0e1422" if dark else "#ffffff")
+        title_color = QColor("#94a3b8" if dark else "#64748b")
+        muted = QColor("#64748b" if dark else "#94a3b8")
         grid_color = QColor(255, 255, 255, 12) if dark else QColor(0, 0, 0, 14)
         plot_border = QColor(255, 255, 255, 20) if dark else QColor(0, 0, 0, 20)
-        legend_color = QColor("#f4f4f5" if dark else "#09090b")
-        legend_bg = QColor("#18181b" if dark else "#f4f4f5")
+        legend_color = QColor("#f8fafc" if dark else "#0f172a")
+        legend_bg = QColor("#141b2d" if dark else "#f1f5f9")
         colors = self.COLORS_DARK if dark else self.COLORS_LIGHT
 
         painter.fillRect(self.rect(), bg)
         painter.setPen(title_color)
-        title_font = QFont("Inter", 9, QFont.Bold)
+        title_font = QFont("Segoe UI", 9, QFont.Bold)
         title_font.setStyleHint(QFont.SansSerif)
         title_font.setLetterSpacing(QFont.AbsoluteSpacing, 0.4)
         painter.setFont(title_font)
@@ -766,7 +870,7 @@ class LatencyChart(QWidget):
 
         if not self.history:
             painter.setPen(muted)
-            painter.setFont(QFont("Inter", 10))
+            painter.setFont(QFont("Segoe UI", 10))
             painter.drawText(plot, Qt.AlignCenter, "Waiting for ICMP telemetry samples...")
             return
 
@@ -782,7 +886,7 @@ class LatencyChart(QWidget):
             painter.drawLine(QPointF(plot.left(), y), QPointF(plot.right(), y))
             val = max_latency * (4 - i) / 4
             painter.setPen(muted)
-            axis_font = QFont("JetBrains Mono", 8)
+            axis_font = QFont("Consolas", 8)
             axis_font.setStyleHint(QFont.Monospace)
             painter.setFont(axis_font)
             painter.drawText(
@@ -901,17 +1005,30 @@ class CardFrame(QFrame):
 class MetricCard(QFrame):
     """Sleek telemetry KPI stat card for top ribbon."""
 
-    def __init__(self, title: str, value: str = "—", subtitle: str = "", parent=None):
+    def __init__(self, title: str, value: str = "—", subtitle: str = "", accent_color: str = "#6366f1", parent=None):
         super().__init__(parent)
         self.setObjectName("metricCard")
         self.setFrameShape(QFrame.NoFrame)
+        self.accent_color = accent_color
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 12, 16, 12)
-        layout.setSpacing(4)
+        layout.setSpacing(3)
+
+        header_row = QHBoxLayout()
+        header_row.setContentsMargins(0, 0, 0, 0)
+        header_row.setSpacing(6)
+
+        self.indicator_dot = QLabel("●")
+        self.indicator_dot.setObjectName("metricDot")
+        self.indicator_dot.setTextFormat(Qt.PlainText)
+        self.indicator_dot.setStyleSheet(f"color: {accent_color}; font-size: 8px; background: transparent;")
+        header_row.addWidget(self.indicator_dot)
 
         self.lbl_title = QLabel(title.upper())
         self.lbl_title.setObjectName("metricTitle")
         self.lbl_title.setTextFormat(Qt.PlainText)
+        header_row.addWidget(self.lbl_title, 1)
+        layout.addLayout(header_row)
 
         self.lbl_val = QLabel(value)
         self.lbl_val.setObjectName("metricValue")
@@ -921,7 +1038,6 @@ class MetricCard(QFrame):
         self.lbl_sub.setObjectName("metricSub")
         self.lbl_sub.setTextFormat(Qt.PlainText)
 
-        layout.addWidget(self.lbl_title)
         layout.addWidget(self.lbl_val)
         layout.addWidget(self.lbl_sub)
 
@@ -980,6 +1096,7 @@ class PingMonitorApp(QMainWindow):
             self.setMinimumSize(760, 520)
 
         self._is_dark = True
+        _ensure_system_fonts()
 
         self.build_ui()
         self.apply_style()
@@ -1040,173 +1157,190 @@ class PingMonitorApp(QMainWindow):
         # Telemetry KPI Ribbon
         kpi_row = QHBoxLayout()
         kpi_row.setSpacing(10)
-        self.card_fleet = MetricCard("Monitored Targets", "0 Targets", "Awaiting start")
-        self.card_reachability = MetricCard("Fleet Reachability", "100%", "0 unreachable")
-        self.card_latency = MetricCard("Average RTT", "—", "Min / Max —")
-        self.card_loss = MetricCard("Global ICMP Loss", "0.0%", "0 dropped pkts")
+        self.card_fleet = MetricCard("Monitored Targets", "0 Targets", "Awaiting start", accent_color="#6366f1")
+        self.card_reachability = MetricCard("Fleet Reachability", "100%", "0 unreachable", accent_color="#10b981")
+        self.card_latency = MetricCard("Average RTT", "—", "Min / Max —", accent_color="#38bdf8")
+        self.card_loss = MetricCard("Global ICMP Loss", "0.0%", "0 dropped pkts", accent_color="#f43f5e")
         kpi_row.addWidget(self.card_fleet)
         kpi_row.addWidget(self.card_reachability)
         kpi_row.addWidget(self.card_latency)
         kpi_row.addWidget(self.card_loss)
         root.addLayout(kpi_row)
 
-        # Target Configuration & Parameter Deck
+        # Target Configuration & Parameter Deck (Streamlined 2-Row Command Bar)
         config_card = CardFrame()
         config_layout = QVBoxLayout(config_card)
-        config_layout.setContentsMargins(16, 14, 16, 14)
-        config_layout.setSpacing(10)
+        config_layout.setContentsMargins(16, 12, 16, 12)
+        config_layout.setSpacing(8)
 
-        section = QLabel("FPING TARGET FLEET SPECIFICATION")
-        section.setObjectName("targetConfigurationCaption")
-        section.setTextFormat(Qt.PlainText)
-        config_layout.addWidget(section)
+        # Row 1: Target Fleet Input & Primary Start/Stop CTA
+        row1 = QHBoxLayout()
+        row1.setSpacing(8)
 
-        host_row = QHBoxLayout()
-        host_row.setSpacing(8)
+        target_badge = QLabel("TARGETS:")
+        target_badge.setObjectName("sectionCaption")
+        target_badge.setTextFormat(Qt.PlainText)
+        row1.addWidget(target_badge)
+
         self.host_entry = QLineEdit()
         self.host_entry.setText("8.8.8.8, 1.1.1.1, google.com")
         self.host_entry.setPlaceholderText("Enter target IPs or domains separated by commas (e.g. 1.1.1.1, 8.8.8.8, cloudflare.com)")
         self.host_entry.setClearButtonEnabled(True)
-        host_row.addWidget(self.host_entry, 1)
+        self.host_entry.setFixedHeight(34)
+        row1.addWidget(self.host_entry, 1)
 
         self.import_btn = QPushButton("Import List")
         self.import_btn.clicked.connect(self.import_hosts_from_file)
         self.import_btn.setObjectName("secondaryBtn")
-        host_row.addWidget(self.import_btn)
+        self.import_btn.setFixedHeight(34)
+        row1.addWidget(self.import_btn)
 
         self.save_config_btn = QPushButton("Save Config")
         self.save_config_btn.clicked.connect(self.save_config)
         self.save_config_btn.setObjectName("secondaryBtn")
-        host_row.addWidget(self.save_config_btn)
+        self.save_config_btn.setFixedHeight(34)
+        row1.addWidget(self.save_config_btn)
 
-        config_layout.addLayout(host_row)
+        self.start_btn = QPushButton("▶ Start fping")
+        self.start_btn.setObjectName("primaryBtn")
+        self.start_btn.setFixedHeight(34)
+        self.start_btn.setMinimumWidth(130)
+        self.start_btn.clicked.connect(self.toggle_monitoring)
+        row1.addWidget(self.start_btn)
 
-        settings_row = QHBoxLayout()
-        settings_row.setSpacing(12)
+        config_layout.addLayout(row1)
 
-        send_gap_col = QVBoxLayout()
-        send_gap_col.setSpacing(3)
-        send_gap_lbl = QLabel("SEND GAP (-i)")
-        send_gap_lbl.setObjectName("sectionCaption")
-        send_gap_lbl.setTextFormat(Qt.PlainText)
-        send_gap_col.addWidget(send_gap_lbl)
+        # Row 2: Parameters & Export Actions (Compact Baseline)
+        row2 = QHBoxLayout()
+        row2.setSpacing(10)
+
+        # Send Gap
+        gap_box = QHBoxLayout()
+        gap_box.setSpacing(4)
+        gap_lbl = QLabel("Gap:")
+        gap_lbl.setObjectName("paramLabel")
+        gap_lbl.setTextFormat(Qt.PlainText)
         self.send_gap_spin = QSpinBox()
         self.send_gap_spin.setRange(1, 1000)
         self.send_gap_spin.setValue(self.SEND_GAP_MS)
         self.send_gap_spin.setSuffix(" ms")
-        self.send_gap_spin.setMinimumWidth(105)
+        self.send_gap_spin.setMinimumWidth(85)
+        self.send_gap_spin.setFixedHeight(28)
         self.send_gap_spin.setToolTip(
             "Requested spacing between outbound packets. The app may lower it to meet the host period for a large list."
         )
-        send_gap_col.addWidget(self.send_gap_spin)
-        settings_row.addLayout(send_gap_col)
+        gap_box.addWidget(gap_lbl)
+        gap_box.addWidget(self.send_gap_spin)
+        row2.addLayout(gap_box)
 
-        pkt_col = QVBoxLayout()
-        pkt_col.setSpacing(3)
-        pkt_lbl = QLabel("PAYLOAD (-b)")
-        pkt_lbl.setObjectName("sectionCaption")
+        # Payload
+        pkt_box = QHBoxLayout()
+        pkt_box.setSpacing(4)
+        pkt_lbl = QLabel("Size:")
+        pkt_lbl.setObjectName("paramLabel")
         pkt_lbl.setTextFormat(Qt.PlainText)
-        pkt_col.addWidget(pkt_lbl)
         self.packet_spin = QSpinBox()
         self.packet_spin.setRange(12, 65500)
         self.packet_spin.setValue(56)
         self.packet_spin.setSuffix(" B")
-        self.packet_spin.setMinimumWidth(105)
+        self.packet_spin.setMinimumWidth(85)
+        self.packet_spin.setFixedHeight(28)
         self.packet_spin.setToolTip("ICMP payload size (min 12 bytes).")
-        pkt_col.addWidget(self.packet_spin)
-        settings_row.addLayout(pkt_col)
+        pkt_box.addWidget(pkt_lbl)
+        pkt_box.addWidget(self.packet_spin)
+        row2.addLayout(pkt_box)
 
-        int_col = QVBoxLayout()
-        int_col.setSpacing(3)
-        int_lbl = QLabel("PERIOD (-p)")
-        int_lbl.setObjectName("sectionCaption")
-        int_lbl.setTextFormat(Qt.PlainText)
-        int_col.addWidget(int_lbl)
+        # Period
+        period_box = QHBoxLayout()
+        period_box.setSpacing(4)
+        period_lbl = QLabel("Period:")
+        period_lbl.setObjectName("paramLabel")
+        period_lbl.setTextFormat(Qt.PlainText)
         self.interval_spin = QDoubleSpinBox()
         self.interval_spin.setRange(0.1, 3600.0)
         self.interval_spin.setDecimals(1)
         self.interval_spin.setSingleStep(0.1)
         self.interval_spin.setValue(self.PING_INTERVAL_SECONDS)
         self.interval_spin.setSuffix(" s")
-        self.interval_spin.setMinimumWidth(105)
+        self.interval_spin.setMinimumWidth(85)
+        self.interval_spin.setFixedHeight(28)
         self.interval_spin.setToolTip(
             "Repeat cycle interval per host. Must be at least as long as timeout."
         )
-        int_col.addWidget(self.interval_spin)
-        settings_row.addLayout(int_col)
+        period_box.addWidget(period_lbl)
+        period_box.addWidget(self.interval_spin)
+        row2.addLayout(period_box)
 
-        timeout_col = QVBoxLayout()
-        timeout_col.setSpacing(3)
-        timeout_lbl = QLabel("TIMEOUT (-t)")
-        timeout_lbl.setObjectName("sectionCaption")
+        # Timeout
+        timeout_box = QHBoxLayout()
+        timeout_box.setSpacing(4)
+        timeout_lbl = QLabel("Timeout:")
+        timeout_lbl.setObjectName("paramLabel")
         timeout_lbl.setTextFormat(Qt.PlainText)
-        timeout_col.addWidget(timeout_lbl)
         self.timeout_spin = QDoubleSpinBox()
         self.timeout_spin.setRange(0.1, 10.0)
         self.timeout_spin.setDecimals(1)
         self.timeout_spin.setSingleStep(0.1)
         self.timeout_spin.setValue(2.0)
         self.timeout_spin.setSuffix(" s")
-        self.timeout_spin.setMinimumWidth(105)
+        self.timeout_spin.setMinimumWidth(85)
+        self.timeout_spin.setFixedHeight(28)
         self.timeout_spin.setToolTip("Maximum wait time for each echo reply.")
-        timeout_col.addWidget(self.timeout_spin)
-        settings_row.addLayout(timeout_col)
+        timeout_box.addWidget(timeout_lbl)
+        timeout_box.addWidget(self.timeout_spin)
+        row2.addLayout(timeout_box)
         self.interval_spin.setMinimum(self.timeout_spin.value())
         self.timeout_spin.valueChanged.connect(self._sync_host_period_minimum)
 
-        hist_col = QVBoxLayout()
-        hist_col.setSpacing(3)
-        hist_lbl = QLabel("WINDOW")
-        hist_lbl.setObjectName("sectionCaption")
-        hist_lbl.setTextFormat(Qt.PlainText)
-        hist_col.addWidget(hist_lbl)
+        # Window
+        window_box = QHBoxLayout()
+        window_box.setSpacing(4)
+        window_lbl = QLabel("Window:")
+        window_lbl.setObjectName("paramLabel")
+        window_lbl.setTextFormat(Qt.PlainText)
         self.history_spin = QSpinBox()
         self.history_spin.setRange(1, 10000)
         self.history_spin.setValue(60)
         self.history_spin.setSuffix(" pts")
-        self.history_spin.setMinimumWidth(105)
+        self.history_spin.setMinimumWidth(85)
+        self.history_spin.setFixedHeight(28)
         self.history_spin.setToolTip("Graph telemetry sample window points.")
-        hist_col.addWidget(self.history_spin)
-        settings_row.addLayout(hist_col)
+        window_box.addWidget(window_lbl)
+        window_box.addWidget(self.history_spin)
+        row2.addLayout(window_box)
 
-        settings_row.addStretch()
+        row2.addStretch()
 
         # Action Buttons aligned compactly
-        btn_box = QHBoxLayout()
-        btn_box.setSpacing(8)
-
         self.clear_btn = QPushButton("Clear")
         self.clear_btn.clicked.connect(self.clear_history)
         self.clear_btn.setEnabled(False)
         self.clear_btn.setObjectName("secondaryBtn")
-        btn_box.addWidget(self.clear_btn)
+        self.clear_btn.setFixedHeight(28)
+        row2.addWidget(self.clear_btn)
 
         self.export_csv_btn = QPushButton("Export CSV")
         self.export_csv_btn.setEnabled(False)
         self.export_csv_btn.clicked.connect(self.export_report_csv)
         self.export_csv_btn.setObjectName("secondaryBtn")
-        btn_box.addWidget(self.export_csv_btn)
+        self.export_csv_btn.setFixedHeight(28)
+        row2.addWidget(self.export_csv_btn)
 
         self.export_xlsx_btn = QPushButton("Export XLSX")
         self.export_xlsx_btn.setEnabled(False)
         self.export_xlsx_btn.clicked.connect(self.export_report_xlsx)
         self.export_xlsx_btn.setObjectName("secondaryBtn")
-        btn_box.addWidget(self.export_xlsx_btn)
+        self.export_xlsx_btn.setFixedHeight(28)
+        row2.addWidget(self.export_xlsx_btn)
 
         self.export_txt_btn = QPushButton("Export TXT")
         self.export_txt_btn.setEnabled(False)
         self.export_txt_btn.clicked.connect(self.export_report_summary)
         self.export_txt_btn.setObjectName("secondaryBtn")
-        btn_box.addWidget(self.export_txt_btn)
+        self.export_txt_btn.setFixedHeight(28)
+        row2.addWidget(self.export_txt_btn)
 
-        self.start_btn = QPushButton("▶ Start fping")
-        self.start_btn.setObjectName("primaryBtn")
-        self.start_btn.setFixedHeight(34)
-        self.start_btn.clicked.connect(self.toggle_monitoring)
-        btn_box.addWidget(self.start_btn)
-
-        settings_row.addLayout(btn_box)
-        config_layout.addLayout(settings_row)
+        config_layout.addLayout(row2)
         root.addWidget(config_card)
 
         # Main splitter
@@ -1343,23 +1477,23 @@ class PingMonitorApp(QMainWindow):
 
     def apply_style(self):
         dark = self._is_dark
-        bg_main = "#09090b" if dark else "#ffffff"
-        bg_card = "#121215" if dark else "#f4f4f5"
-        bg_elevated = "#18181b" if dark else "#ffffff"
-        bg_input = "#121215" if dark else "#ffffff"
+        bg_main = "#090d16" if dark else "#f8fafc"
+        bg_card = "#111726" if dark else "#ffffff"
+        bg_elevated = "#141b2d" if dark else "#f1f5f9"
+        bg_input = "#0e1422" if dark else "#ffffff"
         border_subtle = "rgba(255, 255, 255, 0.08)" if dark else "rgba(0, 0, 0, 0.08)"
         border_highlight = "rgba(255, 255, 255, 0.16)" if dark else "rgba(0, 0, 0, 0.16)"
-        border_focus = "#6366f1" if dark else "#4f46e5"
-        text_main = "#f4f4f5" if dark else "#09090b"
-        text_muted = "#a1a1aa" if dark else "#71717a"
-        text_caption = "#71717a" if dark else "#a1a1aa"
-        bg_table = "#121215" if dark else "#ffffff"
+        border_focus = "#38bdf8" if dark else "#0284c7"
+        text_main = "#f8fafc" if dark else "#0f172a"
+        text_muted = "#94a3b8" if dark else "#475569"
+        text_caption = "#64748b" if dark else "#94a3b8"
+        bg_table = "#0e1422" if dark else "#ffffff"
         grid_color = "rgba(255, 255, 255, 0.04)" if dark else "rgba(0, 0, 0, 0.04)"
-        header_bg = "#18181b" if dark else "#f4f4f5"
-        header_text = "#a1a1aa" if dark else "#71717a"
+        header_bg = "#141b2d" if dark else "#f1f5f9"
+        header_text = "#94a3b8" if dark else "#475569"
         scroll_bg = "transparent"
-        scroll_handle = "#27272a" if dark else "#d4d4d8"
-        scroll_hover = "#3f3f46" if dark else "#a1a1aa"
+        scroll_handle = "#1e293b" if dark else "#cbd5e1"
+        scroll_hover = "#334155" if dark else "#94a3b8"
 
         # Action-aware deliberate accent button (Electric Indigo or Precision Rose)
         if self.is_monitoring:
@@ -1376,7 +1510,7 @@ class PingMonitorApp(QMainWindow):
         QMainWindow, QWidget {{
             background-color: {bg_main};
             color: {text_main};
-            font-family: "Inter", "Segoe UI", -apple-system, BlinkMacSystemFont, Arial, sans-serif;
+            font-family: "Segoe UI", sans-serif;
             font-size: 12px;
         }}
         QFrame#cardFrame {{
@@ -1401,7 +1535,7 @@ class PingMonitorApp(QMainWindow):
             color: {text_main};
             font-size: 21px;
             font-weight: 700;
-            font-family: "JetBrains Mono", "Geist Mono", monospace;
+            font-family: "Consolas", monospace;
             letter-spacing: -0.4px;
         }}
         QLabel#metricSub {{
@@ -1430,7 +1564,7 @@ class PingMonitorApp(QMainWindow):
         QLabel#appFooter {{
             color: {text_caption};
             font-size: 11px;
-            font-family: "JetBrains Mono", "Geist Mono", monospace;
+            font-family: "Consolas", monospace;
         }}
         QLabel#sectionCaption {{
             color: {text_caption};
@@ -1446,6 +1580,11 @@ class PingMonitorApp(QMainWindow):
             letter-spacing: 0.6px;
             text-transform: uppercase;
         }}
+        QLabel#paramLabel {{
+            color: {text_caption};
+            font-size: 11px;
+            font-weight: 600;
+        }}
         QLabel#strongLabel {{
             color: {text_main};
             font-weight: 600;
@@ -1459,7 +1598,7 @@ class PingMonitorApp(QMainWindow):
         QLabel#captionLabel {{
             color: {text_caption};
             font-size: 11px;
-            font-family: "JetBrains Mono", "Geist Mono", monospace;
+            font-family: "Consolas", monospace;
         }}
         QLabel#healthyLabel {{
             color: {"#10b981" if dark else "#059669"};
@@ -1494,8 +1633,8 @@ class PingMonitorApp(QMainWindow):
             background-color: {primary_hover};
         }}
         QPushButton#primaryBtn:disabled {{
-            background-color: {"#18181b" if dark else "#e4e4e7"};
-            color: {"#52525b" if dark else "#a1a1aa"};
+            background-color: {"#141b2d" if dark else "#e2e8f0"};
+            color: {"#475569" if dark else "#94a3b8"};
         }}
         QPushButton#secondaryBtn {{
             background-color: {bg_elevated};
@@ -1507,13 +1646,13 @@ class PingMonitorApp(QMainWindow):
             padding: 6px 14px;
         }}
         QPushButton#secondaryBtn:hover {{
-            background-color: {"#27272a" if dark else "#e4e4e7"};
+            background-color: {"#1e293b" if dark else "#e2e8f0"};
             border-color: {border_highlight};
         }}
         QPushButton#secondaryBtn:disabled {{
             color: {text_caption};
             border-color: {border_subtle};
-            background-color: {"#121215" if dark else "#f4f4f5"};
+            background-color: {"#0e1422" if dark else "#f1f5f9"};
         }}
         QPushButton#themeToggleBtn {{
             background-color: {bg_elevated};
@@ -1523,7 +1662,7 @@ class PingMonitorApp(QMainWindow):
             font-size: 13px;
         }}
         QPushButton#themeToggleBtn:hover {{
-            background-color: {"#27272a" if dark else "#e4e4e7"};
+            background-color: {"#1e293b" if dark else "#e2e8f0"};
             border-color: {border_highlight};
         }}
         QTableWidget {{
@@ -1538,11 +1677,11 @@ class PingMonitorApp(QMainWindow):
             color: {text_main};
             background-color: {bg_table};
             padding: 6px 10px;
-            font-family: "JetBrains Mono", "Geist Mono", monospace;
+            font-family: "Consolas", monospace;
             font-size: 11px;
         }}
         QTableWidget::item:selected {{
-            background-color: {"#18181b" if dark else "#e4e4e7"};
+            background-color: {"#1e293b" if dark else "#e2e8f0"};
             color: {text_main};
         }}
         QHeaderView::section {{
@@ -1556,7 +1695,7 @@ class PingMonitorApp(QMainWindow):
             font-weight: 600;
             letter-spacing: 0.05em;
             text-transform: uppercase;
-            font-family: "Inter", "Segoe UI", sans-serif;
+            font-family: "Segoe UI", sans-serif;
         }}
         QHeaderView {{
             background-color: {header_bg};
@@ -1606,6 +1745,9 @@ class PingMonitorApp(QMainWindow):
         self.theme_btn.setToolTip(f"{theme_name} theme selected. Click to switch.")
         self.theme_btn.setAccessibleName(f"{theme_name} theme selected")
 
+        if hasattr(self, "chart"):
+            self.chart.set_dark(dark)
+
         if not self.is_monitoring:
             if self._stop_pending:
                 self._set_status_stopping()
@@ -1633,8 +1775,8 @@ class PingMonitorApp(QMainWindow):
 
     def _refresh_table_row_themes(self):
         dark = self._is_dark
-        text_color = QColor("#f4f4f5" if dark else "#09090b")
-        bg_color = QColor("#121215" if dark else "#ffffff")
+        text_color = QColor("#f8fafc" if dark else "#0f172a")
+        bg_color = QColor("#0e1422" if dark else "#ffffff")
         for table in (self.table, self.down_table):
             for row in range(table.rowCount()):
                 for col in range(table.columnCount()):
@@ -1648,7 +1790,7 @@ class PingMonitorApp(QMainWindow):
                             elif "No ICMP Reply" in status:
                                 item.setForeground(QColor("#f59e0b" if dark else "#d97706"))
                             elif any(k in status for k in ("Queued", "Idle")):
-                                item.setForeground(QColor("#a1a1aa" if dark else "#71717a"))
+                                item.setForeground(QColor("#94a3b8" if dark else "#64748b"))
                             else:
                                 item.setForeground(QColor("#f43f5e" if dark else "#e11d48"))
                         else:
@@ -1658,12 +1800,12 @@ class PingMonitorApp(QMainWindow):
         dark = self._is_dark
         bg = "rgba(255, 255, 255, 0.05)" if dark else "rgba(0, 0, 0, 0.04)"
         border = "rgba(255, 255, 255, 0.10)" if dark else "rgba(0, 0, 0, 0.08)"
-        text = "#a1a1aa" if dark else "#71717a"
+        text = "#94a3b8" if dark else "#64748b"
         self.status_pill.setText("● IDLE")
         self.status_pill.setStyleSheet(
             f"background: {bg}; color: {text}; border: 1px solid {border}; "
             "border-radius: 6px; font-weight: 700; font-size: 10px; letter-spacing: 0.8px; padding: 3px 10px; "
-            'font-family: "Inter", -apple-system, "Segoe UI", sans-serif;'
+            'font-family: "Segoe UI", sans-serif;'
         )
 
     def _set_status_running(self):
@@ -1675,7 +1817,7 @@ class PingMonitorApp(QMainWindow):
         self.status_pill.setStyleSheet(
             f"background: {bg}; color: {text}; border: 1px solid {border}; "
             "border-radius: 6px; font-weight: 700; font-size: 10px; letter-spacing: 0.8px; padding: 3px 10px; "
-            'font-family: "Inter", -apple-system, "Segoe UI", sans-serif;'
+            'font-family: "Segoe UI", sans-serif;'
         )
 
     def _set_status_stopping(self):
@@ -1687,7 +1829,7 @@ class PingMonitorApp(QMainWindow):
         self.status_pill.setStyleSheet(
             f"background: {bg}; color: {text}; border: 1px solid {border}; "
             "border-radius: 6px; font-weight: 700; font-size: 10px; letter-spacing: 0.8px; padding: 3px 10px; "
-            'font-family: "Inter", -apple-system, "Segoe UI", sans-serif;'
+            'font-family: "Segoe UI", sans-serif;'
         )
 
     # ------------------------------------------------------------------ DNS Management
@@ -1705,36 +1847,36 @@ class PingMonitorApp(QMainWindow):
             if dark:
                 self.dns_issues_btn.setStyleSheet("""
                     QPushButton#dnsIssuesBtn {
-                        background-color: #18181b;
-                        color: #71717a;
+                        background-color: #141b2d;
+                        color: #94a3b8;
                         border: 1px solid rgba(255, 255, 255, 0.08);
                         border-radius: 6px;
                         padding: 3px 10px;
                         font-size: 11px;
                         font-weight: 600;
-                        font-family: "Inter", "Segoe UI", sans-serif;
+                        font-family: "Segoe UI", sans-serif;
                     }
                     QPushButton#dnsIssuesBtn:hover {
-                        background-color: #27272a;
-                        color: #a1a1aa;
+                        background-color: #1e293b;
+                        color: #f8fafc;
                         border-color: rgba(255, 255, 255, 0.15);
                     }
                 """)
             else:
                 self.dns_issues_btn.setStyleSheet("""
                     QPushButton#dnsIssuesBtn {
-                        background-color: #f4f4f5;
-                        color: #71717a;
+                        background-color: #f1f5f9;
+                        color: #475569;
                         border: 1px solid rgba(0, 0, 0, 0.08);
                         border-radius: 6px;
                         padding: 3px 10px;
                         font-size: 11px;
                         font-weight: 600;
-                        font-family: "Inter", "Segoe UI", sans-serif;
+                        font-family: "Segoe UI", sans-serif;
                     }
                     QPushButton#dnsIssuesBtn:hover {
-                        background-color: #e4e4e7;
-                        color: #09090b;
+                        background-color: #e2e8f0;
+                        color: #0f172a;
                         border-color: rgba(0, 0, 0, 0.15);
                     }
                 """)
@@ -1750,7 +1892,7 @@ class PingMonitorApp(QMainWindow):
                         padding: 3px 10px;
                         font-size: 11px;
                         font-weight: 700;
-                        font-family: "Inter", "Segoe UI", sans-serif;
+                        font-family: "Segoe UI", sans-serif;
                     }
                     QPushButton#dnsIssuesBtn:hover {
                         background-color: rgba(245, 158, 11, 0.25);
@@ -1767,7 +1909,7 @@ class PingMonitorApp(QMainWindow):
                         padding: 3px 10px;
                         font-size: 11px;
                         font-weight: 700;
-                        font-family: "Inter", "Segoe UI", sans-serif;
+                        font-family: "Segoe UI", sans-serif;
                     }
                     QPushButton#dnsIssuesBtn:hover {
                         background-color: rgba(245, 158, 11, 0.20);
@@ -1855,8 +1997,8 @@ class PingMonitorApp(QMainWindow):
         box.setIcon(icon)
         box.setStandardButtons(QMessageBox.Ok)
         dark = self._is_dark
-        bg = "#121215" if dark else "#ffffff"
-        text_c = "#f4f4f5" if dark else "#09090b"
+        bg = "#111726" if dark else "#ffffff"
+        text_c = "#f8fafc" if dark else "#0f172a"
         border_c = "rgba(255, 255, 255, 0.08)" if dark else "rgba(0, 0, 0, 0.08)"
         btn_bg = "#6366f1" if dark else "#4f46e5"
         btn_hover = "#4f46e5" if dark else "#4338ca"
@@ -1864,7 +2006,7 @@ class PingMonitorApp(QMainWindow):
             QMessageBox {{
                 background-color: {bg};
                 color: {text_c};
-                font-family: "Inter", "Segoe UI", Arial, sans-serif;
+                font-family: "Segoe UI", sans-serif;
                 border: 1px solid {border_c};
                 border-radius: 12px;
             }}
@@ -1897,19 +2039,19 @@ class PingMonitorApp(QMainWindow):
         box.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
         box.setDefaultButton(QMessageBox.No)
         dark = self._is_dark
-        bg = "#121215" if dark else "#ffffff"
-        text_c = "#f4f4f5" if dark else "#09090b"
+        bg = "#111726" if dark else "#ffffff"
+        text_c = "#f8fafc" if dark else "#0f172a"
         border_c = "rgba(255, 255, 255, 0.08)" if dark else "rgba(0, 0, 0, 0.08)"
         btn_bg = "#6366f1" if dark else "#4f46e5"
         btn_hover = "#4f46e5" if dark else "#4338ca"
-        sec_bg = "#18181b" if dark else "#f4f4f5"
-        sec_hover = "#27272a" if dark else "#e4e4e7"
-        sec_text = "#f4f4f5" if dark else "#09090b"
+        sec_bg = "#141b2d" if dark else "#f1f5f9"
+        sec_hover = "#1e293b" if dark else "#e2e8f0"
+        sec_text = "#f8fafc" if dark else "#0f172a"
         box.setStyleSheet(f"""
             QMessageBox {{
                 background-color: {bg};
                 color: {text_c};
-                font-family: "Inter", "Segoe UI", Arial, sans-serif;
+                font-family: "Segoe UI", sans-serif;
                 border: 1px solid {border_c};
                 border-radius: 12px;
             }}

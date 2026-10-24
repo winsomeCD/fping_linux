@@ -11,7 +11,7 @@ import unittest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from PySide6.QtWidgets import QApplication
-from fping_linux import PingMonitorApp, _sanitize_csv_cell
+from fping_linux import PingMonitorApp, _sanitize_csv_cell, _ensure_system_fonts
 from fping_linux_probes import normalize_targets, ProbeResult
 
 
@@ -22,6 +22,7 @@ class TestVerification(unittest.TestCase):
         cls.app = QApplication.instance()
         if cls.app is None:
             cls.app = QApplication(sys.argv)
+        _ensure_system_fonts()
 
     def test_csv_sanitization(self):
         self.assertEqual(_sanitize_csv_cell("=cmd"), "'=cmd")

@@ -5,5 +5,5 @@
   "timeout": 1.0,
   "send_gap_ms": 10,
   "history_points": 60,
-  "dark_theme": false
+  "dark_theme": true
 }
