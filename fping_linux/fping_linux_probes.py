@@ -663,9 +663,9 @@ class ProbeTask(QRunnable):
                 except Exception as err:
                     res = ProbeResult("Probe Error", error=str(err), packet_sent=False)
 
+                self.signals.completed.emit(self.run_id, target, res)
                 if self._async_stop_event.is_set():
                     return
-                self.signals.completed.emit(self.run_id, target, res)
                 delay = max(0.0, self.interval - (loop.time() - started))
                 if delay:
                     try:

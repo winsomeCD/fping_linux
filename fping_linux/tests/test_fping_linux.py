@@ -507,6 +507,169 @@ class TestDNSIssuesIsolationAndUI(unittest.TestCase):
         self.assertEqual(_sanitize_csv_cell("+10"), "+10")
         self.assertEqual(_sanitize_csv_cell("8.8.8.8"), "8.8.8.8")
 
+    def test_csv_export_includes_recovered_hosts_with_lost_pings(self):
+        import csv
+        import tempfile
+        win = PingMonitorApp()
+        win._msg = lambda *args, **kwargs: None
+        win._confirm = lambda *args: False
+        win.show()
+        self.app.processEvents()
+
+        target = "recovered.example"
+        win.host_data[target] = {
+            "sent": 3, "received": 2, "checks": 3,
+            "latencies": [10.0, 0, 12.0], "latency_count": 2,
+            "latency_sum": 22.0, "min_latency": 10.0, "max_latency": 12.0,
+            "last_status": "Connected", "last_error": None,
+            "consecutive_fails": 0, "last_down_time": "2026-10-03 12:00:01",
+            "timeline_stats": [
+                "[2026-10-03 12:00:00] Seq 1: Success — Latency 10.00 ms",
+                "[2026-10-03 12:00:01] Seq 2: FAILED — No ICMP Reply",
+                "[2026-10-03 12:00:02] Seq 3: Success — Latency 12.00 ms",
+            ],
+            "log_rows": [
+                (1, "2026-10-03 12:00:00", "Success", 10.0),
+                (2, "2026-10-03 12:00:01", "No ICMP Reply", ""),
+                (3, "2026-10-03 12:00:02", "Success", 12.0),
+            ],
+        }
+        with tempfile.TemporaryDirectory() as tmpdir:
+            report_path = Path(tmpdir) / "report_recovered.csv"
+            win._open_file_dialog = lambda *args, **kwargs: str(report_path)
+
+            win.export_report_csv()
+
+            with report_path.open(encoding="utf-8-sig", newline="") as report_file:
+                rows = list(csv.DictReader(report_file))
+
+            # 1. Recovered host with lost pings must appear in No ICMP Reply section
+            no_reply_rows = [r for r in rows if r["Section"] == "No ICMP Reply"]
+            self.assertEqual(len(no_reply_rows), 1)
+            self.assertEqual(no_reply_rows[0]["Host"], target)
+            self.assertIn("Recovered", no_reply_rows[0]["Status"])
+            self.assertEqual(no_reply_rows[0]["Last_Down_At"], "2026-10-03 12:00:01")
+
+            # 2. Probe section must contain the No ICMP Reply row with diagnostic details
+            probe_rows = [r for r in rows if r["Section"] == "Probe"]
+            self.assertEqual(len(probe_rows), 3)
+            lost_ping_probe = next(r for r in probe_rows if r["Status"] == "No ICMP Reply")
+            self.assertEqual(lost_ping_probe["Sequence"], "2")
+            self.assertEqual(lost_ping_probe["Details"], "No ICMP reply before timeout")
+
+        win.close()
+
+    def test_txt_export_includes_recovered_hosts_with_lost_pings(self):
+        import tempfile
+        win = PingMonitorApp()
+        win._msg = lambda *args, **kwargs: None
+        win._confirm = lambda *args: False
+        win.show()
+        self.app.processEvents()
+
+        target = "recovered.example"
+        win.host_data[target] = {
+            "sent": 3, "received": 2, "checks": 3,
+            "latencies": [10.0, 0, 12.0], "latency_count": 2,
+            "latency_sum": 22.0, "min_latency": 10.0, "max_latency": 12.0,
+            "last_status": "Connected", "last_error": None,
+            "consecutive_fails": 0, "last_down_time": "2026-10-03 12:00:01",
+            "timeline_stats": [
+                "[2026-10-03 12:00:00] Seq 1: Success — Latency 10.00 ms",
+                "[2026-10-03 12:00:01] Seq 2: FAILED — No ICMP Reply",
+                "[2026-10-03 12:00:02] Seq 3: Success — Latency 12.00 ms",
+            ],
+            "log_rows": [
+                (1, "2026-10-03 12:00:00", "Success", 10.0),
+                (2, "2026-10-03 12:00:01", "No ICMP Reply", ""),
+                (3, "2026-10-03 12:00:02", "Success", 12.0),
+            ],
+        }
+        with tempfile.TemporaryDirectory() as tmpdir:
+            report_path = Path(tmpdir) / "report_recovered.txt"
+            win._open_file_dialog = lambda *args, **kwargs: str(report_path)
+
+            win.export_report_summary()
+
+            report = report_path.read_text(encoding="utf-8")
+            self.assertNotIn("No target recorded an ICMP timeout", report)
+            self.assertIn("recovered.example", report)
+            self.assertIn("Recovered", report)
+            self.assertIn("2026-10-03 12:00:01", report)
+
+        win.close()
+
+    def test_xlsx_export_probe_details_includes_no_icmp_reply_description(self):
+        import tempfile
+        from openpyxl import load_workbook
+        win = PingMonitorApp()
+        win._msg = lambda *args, **kwargs: None
+        win._confirm = lambda *args: False
+        win.show()
+        self.app.processEvents()
+
+        target = "recovered.example"
+        win.host_data[target] = {
+            "sent": 2, "received": 1, "checks": 2,
+            "latencies": [10.0, 0], "latency_count": 1,
+            "latency_sum": 10.0, "min_latency": 10.0, "max_latency": 10.0,
+            "last_status": "Connected", "last_error": None,
+            "consecutive_fails": 0, "last_down_time": "2026-10-03 12:00:01",
+            "timeline_stats": [],
+            "log_rows": [
+                (1, "2026-10-03 12:00:00", "Success", 10.0),
+                (2, "2026-10-03 12:00:01", "No ICMP Reply", ""),
+            ],
+        }
+        with tempfile.TemporaryDirectory() as tmpdir:
+            report_path = Path(tmpdir) / "report_recovered.xlsx"
+            win._open_file_dialog = lambda *args, **kwargs: str(report_path)
+
+            win.export_report_xlsx()
+
+            workbook = load_workbook(report_path, data_only=True)
+            probe_sheet = workbook["Probe Details"]
+            rows = list(probe_sheet.iter_rows(values_only=True))
+            self.assertEqual(rows[0], ("Host", "Sequence", "Timestamp", "Status", "Latency ms", "Details"))
+            lost_ping_row = next(r for r in rows[1:] if r[3] == "No ICMP Reply")
+            self.assertEqual(lost_ping_row[0], target)
+            self.assertEqual(lost_ping_row[1], 2)
+            self.assertEqual(lost_ping_row[5], "No ICMP reply before timeout")
+
+        win.close()
+
+    def test_in_flight_probes_processed_during_stop_pending(self):
+        win = PingMonitorApp()
+        win._msg = lambda *args, **kwargs: None
+        win._confirm = lambda *args: False
+        win.show()
+        self.app.processEvents()
+
+        target = "pending.example"
+        win._run_id = 77
+        win.is_monitoring = False
+        win._stop_pending = True
+        win.host_data[target] = {
+            "sent": 0, "received": 0, "checks": 0,
+            "latencies": [], "latency_count": 0,
+            "latency_sum": 0.0, "min_latency": None, "max_latency": None,
+            "timeline_stats": [], "log_rows": [], "last_status": None,
+            "last_error": None, "consecutive_fails": 0, "last_down_time": "-",
+        }
+        win.table.setRowCount(1)
+        item = SortableTableWidgetItem(target)
+        win.table.setItem(0, 0, item)
+        win._host_items[target] = item
+
+        win._handle_probe_result(77, target, ProbeResult("No ICMP Reply"))
+
+        self.assertEqual(len(win.host_data[target]["log_rows"]), 1)
+        self.assertEqual(win.host_data[target]["log_rows"][0][2], "No ICMP Reply")
+        self.assertEqual(win.host_data[target]["last_status"], "No ICMP Reply")
+        self.assertNotEqual(win.host_data[target]["last_down_time"], "-")
+
+        win.close()
+
 
 if __name__ == "__main__":
     unittest.main()

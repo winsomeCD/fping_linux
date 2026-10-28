@@ -37,7 +37,8 @@ ssh_automation/
 ping_monitor/
 traceroute-map/
 ai-daily-digest/
-tests/
+word-app/
+/tests/
 30-day-vibe-coding-plan.md
 Online-learning-implementation-plan
 network-monitoring-platform-brainstorm.md
