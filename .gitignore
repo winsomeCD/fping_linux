@@ -55,3 +55,8 @@ fping_linux/*.png
 ui_redesign_*.png
 font_test.png
 current_ui.png
+
+AGENTS.md
+AI-Animation/
+*.tmp.driveupload/
+.tmp.driveupload/
