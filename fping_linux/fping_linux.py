@@ -279,14 +279,14 @@ class HostDetailDialog(QDialog):
 
     def _apply_style(self):
         dark = self._dark
-        bg = "#0c0d10" if dark else "#f8f9fa"
-        surface = "#14171d" if dark else "#ffffff"
-        cell_bg = "#1a1e26" if dark else "#f1f3f5"
+        bg = "#14171f" if dark else "#f8f9fa"
+        surface = "#1c202b" if dark else "#ffffff"
+        cell_bg = "#242938" if dark else "#f1f3f5"
         text = "#f4f4f5" if dark else "#18181b"
         muted = "#9ca3af" if dark else "#52525b"
         border = "rgba(255, 255, 255, 0.08)" if dark else "rgba(0, 0, 0, 0.08)"
         border_highlight = "rgba(62, 207, 142, 0.28)" if dark else "rgba(22, 163, 74, 0.25)"
-        btn_bg = "#1a1e26" if dark else "#f1f3f5"
+        btn_bg = "#242938" if dark else "#f1f3f5"
         self.setStyleSheet(f"""
             QDialog {{
                 background-color: {bg};
@@ -671,14 +671,14 @@ class DNSIssuesDialog(QDialog):
 
     def _apply_style(self):
         dark = self._dark
-        bg = "#0c0d10" if dark else "#f8fafc"
-        surface = "#14171d" if dark else "#ffffff"
-        elevated = "#1a1f27" if dark else "#f1f5f9"
+        bg = "#14171f" if dark else "#f8fafc"
+        surface = "#1c202b" if dark else "#ffffff"
+        elevated = "#242938" if dark else "#f1f5f9"
         text = "#ededed" if dark else "#0f172a"
         muted = "#8c94a0" if dark else "#64748b"
         border = "rgba(255, 255, 255, 0.08)" if dark else "rgba(15, 23, 42, 0.08)"
         border_highlight = "rgba(255, 255, 255, 0.16)" if dark else "rgba(15, 23, 42, 0.16)"
-        header_bg = "#181d24" if dark else "#f1f5f9"
+        header_bg = "#212634" if dark else "#f1f5f9"
         grid = "rgba(255, 255, 255, 0.04)" if dark else "rgba(15, 23, 42, 0.04)"
         primary = "#3ecf8e" if dark else "#059669"
         primary_hover = "#34b27b" if dark else "#047857"
@@ -744,7 +744,7 @@ class DNSIssuesDialog(QDialog):
                 border: none;
             }}
             QTableWidget::item:selected {{
-                background-color: {"#242b35" if dark else "#e2e8f0"};
+                background-color: {"#2d3446" if dark else "#e2e8f0"};
                 color: {text};
             }}
             QHeaderView::section {{
@@ -769,7 +769,7 @@ class DNSIssuesDialog(QDialog):
             }}
             QPushButton#secondaryBtn:hover {{
                 border-color: {border_highlight};
-                background-color: {"#242b35" if dark else "#e2e8f0"};
+                background-color: {"#2d3446" if dark else "#e2e8f0"};
             }}
             QPushButton#primaryBtn {{
                 background-color: {primary};
@@ -854,13 +854,13 @@ class LatencyChart(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
         dark = self._dark
-        bg = QColor("#0c0d10" if dark else "#ffffff")
+        bg = QColor("#171a24" if dark else "#ffffff")
         title_color = QColor("#8c94a0" if dark else "#64748b")
         muted = QColor("#606773" if dark else "#94a3b8")
         grid_color = QColor(255, 255, 255, 12) if dark else QColor(0, 0, 0, 14)
         plot_border = QColor(255, 255, 255, 20) if dark else QColor(0, 0, 0, 20)
         legend_color = QColor("#ededed" if dark else "#0f172a")
-        legend_bg = QColor("#14171d" if dark else "#f8fafc")
+        legend_bg = QColor("#212634" if dark else "#f8fafc")
         colors = self.COLORS_DARK if dark else self.COLORS_LIGHT
 
         painter.fillRect(self.rect(), bg)
@@ -1026,8 +1026,8 @@ class BrandIconWidget(QWidget):
 
         # Rounded squircle background
         grad = QLinearGradient(0, 0, w, h)
-        grad.setColorAt(0.0, QColor("#161b22"))
-        grad.setColorAt(1.0, QColor("#0c0f14"))
+        grad.setColorAt(0.0, QColor("#242938"))
+        grad.setColorAt(1.0, QColor("#14171f"))
         painter.setBrush(QBrush(grad))
         painter.setPen(QPen(QColor(62, 207, 142, 90), 1.2))
         painter.drawRoundedRect(QRectF(1, 1, w - 2, h - 2), 8, 8)
@@ -1632,19 +1632,19 @@ class PingMonitorApp(QMainWindow):
 
     def apply_style(self):
         dark = self._is_dark
-        bg_main = "#0c0d10" if dark else "#f4f5f8"
-        bg_card = "#14171d" if dark else "#ffffff"
-        bg_elevated = "#1a1f27" if dark else "#f0f2f5"
-        bg_input = "#0e1116" if dark else "#ffffff"
+        bg_main = "#14171f" if dark else "#f4f5f8"
+        bg_card = "#1c202b" if dark else "#ffffff"
+        bg_elevated = "#242938" if dark else "#f0f2f5"
+        bg_input = "#171a24" if dark else "#ffffff"
         border_subtle = "rgba(255, 255, 255, 0.08)" if dark else "rgba(15, 23, 42, 0.08)"
         border_highlight = "rgba(255, 255, 255, 0.16)" if dark else "rgba(15, 23, 42, 0.16)"
         border_focus = "#3ecf8e" if dark else "#059669"
         text_main = "#ededed" if dark else "#0f172a"
         text_muted = "#8c94a0" if dark else "#64748b"
         text_caption = "#606773" if dark else "#94a3b8"
-        bg_table = "#101318" if dark else "#ffffff"
+        bg_table = "#171a24" if dark else "#ffffff"
         grid_color = "rgba(255, 255, 255, 0.04)" if dark else "rgba(15, 23, 42, 0.04)"
-        header_bg = "#181d24" if dark else "#f1f5f9"
+        header_bg = "#212634" if dark else "#f1f5f9"
         header_text = "#8c94a0" if dark else "#475569"
         scroll_bg = "transparent"
         scroll_handle = "#232934" if dark else "#cbd5e1"
@@ -1660,7 +1660,7 @@ class PingMonitorApp(QMainWindow):
             primary = "#3ecf8e" if dark else "#059669"
             primary_hover = "#34b27b" if dark else "#047857"
             btn_text = "▶ Start fping"
-            btn_fg = "#0c0d10" if dark else "#ffffff"
+            btn_fg = "#0b0d11" if dark else "#ffffff"
         self.start_btn.setText(btn_text)
 
         font_stack = '-apple-system, BlinkMacSystemFont, "Segoe UI", "Inter", "Ubuntu", "Liberation Sans", "DejaVu Sans", sans-serif'
@@ -1839,7 +1839,7 @@ class PingMonitorApp(QMainWindow):
         QPushButton#presetChip:hover {{
             color: {text_main};
             border-color: {border_highlight};
-            background-color: {"#242b35" if dark else "#e2e8f0"};
+            background-color: {"#2d3446" if dark else "#e2e8f0"};
         }}
         QPushButton#secondaryBtn {{
             background-color: {bg_elevated};
@@ -1851,7 +1851,7 @@ class PingMonitorApp(QMainWindow):
             padding: 5px 10px;
         }}
         QPushButton#secondaryBtn:hover {{
-            background-color: {"#242b35" if dark else "#e2e8f0"};
+            background-color: {"#2d3446" if dark else "#e2e8f0"};
             border-color: {border_highlight};
         }}
         QPushButton#secondaryBtn:disabled {{
@@ -1867,7 +1867,7 @@ class PingMonitorApp(QMainWindow):
             font-size: 13px;
         }}
         QPushButton#themeToggleBtn:hover {{
-            background-color: {"#242b35" if dark else "#e2e8f0"};
+            background-color: {"#2d3446" if dark else "#e2e8f0"};
             border-color: {border_highlight};
         }}
         QTableWidget {{
@@ -1887,7 +1887,7 @@ class PingMonitorApp(QMainWindow):
             font-size: 11px;
         }}
         QTableWidget::item:selected {{
-            background-color: {"#242b35" if dark else "#e2e8f0"};
+            background-color: {"#2d3446" if dark else "#e2e8f0"};
             color: {text_main};
         }}
         QHeaderView::section {{
@@ -1982,7 +1982,7 @@ class PingMonitorApp(QMainWindow):
     def _refresh_table_row_themes(self):
         dark = self._is_dark
         text_color = QColor("#ededed" if dark else "#0f172a")
-        bg_color = QColor("#101318" if dark else "#ffffff")
+        bg_color = QColor("#171a24" if dark else "#ffffff")
         for table in (self.table, self.down_table):
             for row in range(table.rowCount()):
                 for col in range(table.columnCount()):
