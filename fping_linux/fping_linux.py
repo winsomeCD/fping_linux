@@ -1249,14 +1249,7 @@ class PingMonitorApp(QMainWindow):
         sidebar_layout.setContentsMargins(2, 0, 8, 4)
         sidebar_layout.setSpacing(10)
 
-        # 1. Primary Engine CTA Trigger
-        self.start_btn = QPushButton("▶ Start fping")
-        self.start_btn.setObjectName("primaryBtn")
-        self.start_btn.setFixedHeight(38)
-        self.start_btn.clicked.connect(self.toggle_monitoring)
-        sidebar_layout.addWidget(self.start_btn)
-
-        # 2. Vitals Matrix HUD (2x2 KPI Grid)
+        # 1. Vitals Matrix HUD (2x2 KPI Grid)
         vitals_card = CardFrame()
         vitals_layout = QVBoxLayout(vitals_card)
         vitals_layout.setContentsMargins(12, 10, 12, 10)
@@ -1422,6 +1415,13 @@ class PingMonitorApp(QMainWindow):
 
         params_layout.addLayout(p_grid)
         sidebar_layout.addWidget(params_card)
+
+        # 4. Primary Engine CTA Trigger (Start / Stop)
+        self.start_btn = QPushButton("▶ Start fping")
+        self.start_btn.setObjectName("primaryBtn")
+        self.start_btn.setFixedHeight(38)
+        self.start_btn.clicked.connect(self.toggle_monitoring)
+        sidebar_layout.addWidget(self.start_btn)
 
         # 5. Reports & Controls Deck
         storage_card = CardFrame()
