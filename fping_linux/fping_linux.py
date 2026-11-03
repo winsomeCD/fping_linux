@@ -1239,7 +1239,7 @@ class PingMonitorApp(QMainWindow):
         noc_badge.setTextFormat(Qt.PlainText)
         title_row.addWidget(noc_badge)
 
-        linux_badge = QLabel("🐧 LINUX-NATIVE")
+        linux_badge = QLabel("LINUX-NATIVE")
         linux_badge.setObjectName("linuxBadge")
         linux_badge.setTextFormat(Qt.PlainText)
         title_row.addWidget(linux_badge)
@@ -1340,22 +1340,22 @@ class PingMonitorApp(QMainWindow):
         fleet_layout.addWidget(self.host_entry)
 
         presets_row = QHBoxLayout()
-        presets_row.setSpacing(4)
-        preset_dns = QPushButton("⚡ Public DNS")
+        presets_row.setSpacing(6)
+        preset_dns = QPushButton("Public DNS")
         preset_dns.setObjectName("presetChip")
-        preset_dns.setFixedHeight(22)
+        preset_dns.setFixedHeight(26)
         preset_dns.setToolTip("Inject standard public DNS resolvers: 1.1.1.1, 8.8.8.8, 9.9.9.9")
         preset_dns.clicked.connect(lambda: self._inject_preset("1.1.1.1, 8.8.8.8, 9.9.9.9, 208.67.222.222"))
 
-        preset_cloud = QPushButton("☁ Cloud Edge")
+        preset_cloud = QPushButton("Cloud Edge")
         preset_cloud.setObjectName("presetChip")
-        preset_cloud.setFixedHeight(22)
+        preset_cloud.setFixedHeight(26)
         preset_cloud.setToolTip("Inject global cloud targets: cloudflare.com, google.com, github.com")
         preset_cloud.clicked.connect(lambda: self._inject_preset("cloudflare.com, google.com, github.com, aws.amazon.com"))
 
-        preset_lan = QPushButton("🏠 Local LAN")
+        preset_lan = QPushButton("Local LAN")
         preset_lan.setObjectName("presetChip")
-        preset_lan.setFixedHeight(22)
+        preset_lan.setFixedHeight(26)
         preset_lan.setToolTip("Inject local network gateways: 192.168.1.1, 10.0.0.1, 127.0.0.1")
         preset_lan.clicked.connect(lambda: self._inject_preset("192.168.1.1, 192.168.0.1, 10.0.0.1, 127.0.0.1"))
 
@@ -1543,6 +1543,11 @@ class PingMonitorApp(QMainWindow):
         dash_title.setTextFormat(Qt.PlainText)
         top.addWidget(dash_title)
 
+        dash_hint = QLabel("• Double-click row to inspect")
+        dash_hint.setObjectName("tableHint")
+        dash_hint.setTextFormat(Qt.PlainText)
+        top.addWidget(dash_hint)
+
         # Integrated Filter Input
         self.search_box = QLineEdit()
         self.search_box.setPlaceholderText("Filter targets...")
@@ -1581,11 +1586,14 @@ class PingMonitorApp(QMainWindow):
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.setSortingEnabled(False)
         self.table.setShowGrid(True)
+        self.table.setToolTip("Double-click any host to open detailed telemetry inspection")
+        self.table.viewport().setCursor(Qt.PointingHandCursor)
         self.table.doubleClicked.connect(self.on_table_double_click)
         h = self.table.horizontalHeader()
         h.setFixedHeight(32)
         h.setSectionsClickable(True)
-        h.setSortIndicatorShown(False)
+        h.setSortIndicatorShown(True)
+        h.setSortIndicator(0, Qt.AscendingOrder)
         h.sectionClicked.connect(self.on_table_header_clicked)
         h.setSectionResizeMode(QHeaderView.Stretch)
         h.setSectionResizeMode(0, QHeaderView.ResizeToContents)
@@ -1627,8 +1635,12 @@ class PingMonitorApp(QMainWindow):
         self.down_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.down_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.down_table.setSortingEnabled(True)
+        self.down_table.setToolTip("Double-click any host to open detailed telemetry inspection")
+        self.down_table.viewport().setCursor(Qt.PointingHandCursor)
         dh = self.down_table.horizontalHeader()
         dh.setFixedHeight(30)
+        dh.setSortIndicatorShown(True)
+        dh.setSortIndicator(0, Qt.AscendingOrder)
         dh.setSectionResizeMode(QHeaderView.Stretch)
         dh.setSectionResizeMode(0, QHeaderView.ResizeToContents)
         self.down_table.setShowGrid(True)
@@ -1672,6 +1684,8 @@ class PingMonitorApp(QMainWindow):
         self._is_dark = not self._is_dark
         self.apply_style()
         self.chart.set_dark(self._is_dark)
+        if hasattr(self, "brand_icon"):
+            self.brand_icon.set_dark(self._is_dark)
         self.chart.update()
         self.refresh_dashboard()
 
@@ -1834,6 +1848,11 @@ class PingMonitorApp(QMainWindow):
             font-size: 11px;
             font-family: {mono_font_stack};
         }}
+        QLabel#tableHint {{
+            color: {text_caption};
+            font-size: 11px;
+            font-style: italic;
+        }}
         QLabel#healthyLabel {{
             color: {"#3ecf8e" if dark else "#059669"};
             font-weight: 600;
@@ -1876,10 +1895,10 @@ class PingMonitorApp(QMainWindow):
             background-color: {bg_elevated};
             color: {text_muted};
             border: 1px solid {border_subtle};
-            border-radius: 4px;
-            font-size: 10px;
+            border-radius: 5px;
+            font-size: 11px;
             font-weight: 600;
-            padding: 2px 6px;
+            padding: 3px 8px;
         }}
         QPushButton#presetChip:hover {{
             color: {text_main};
@@ -1924,6 +1943,9 @@ class PingMonitorApp(QMainWindow):
             border-radius: 8px;
             outline: none;
         }}
+        QTableWidget:focus {{
+            border: 1px solid {border_focus};
+        }}
         QTableWidget::item {{
             color: {text_main};
             background-color: {bg_table};
@@ -1941,7 +1963,7 @@ class PingMonitorApp(QMainWindow):
             border: none;
             border-bottom: 1px solid {border_subtle};
             border-right: 1px solid {grid_color};
-            padding: 6px 8px;
+            padding: 6px 14px 6px 8px;
             font-size: 10px;
             font-weight: 700;
             letter-spacing: 0.05em;
@@ -1998,6 +2020,8 @@ class PingMonitorApp(QMainWindow):
 
         if hasattr(self, "chart"):
             self.chart.set_dark(dark)
+        if hasattr(self, "brand_icon"):
+            self.brand_icon.set_dark(dark)
 
         if not self.is_monitoring:
             if self._stop_pending:
