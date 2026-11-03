@@ -793,34 +793,50 @@ class DNSIssuesDialog(QDialog):
 # Latency Chart
 # ---------------------------------------------------------------------------
 class LatencyChart(QWidget):
-    MAX_HOSTS = None
+    MAX_HOSTS = 20
     COLORS_DARK = [
-        "#3ecf8e",  # Supabase Emerald
-        "#00e5ff",  # Cyber Cyan
-        "#fbbf24",  # Warm Amber
-        "#f43f5e",  # Precision Rose
-        "#a855f7",  # Vivid Purple
-        "#38bdf8",  # Electric Sky
-        "#34d399",  # Mint
-        "#f97316",  # Tangerine
-        "#e879f9",  # Fuchsia
-        "#818cf8",  # Electric Indigo
-        "#4ade80",  # Spring Green
-        "#94a3b8",  # Muted Slate
+        "#3ecf8e",  # 1. Supabase Emerald
+        "#00e5ff",  # 2. Cyber Cyan
+        "#fbbf24",  # 3. Warm Amber
+        "#f43f5e",  # 4. Precision Rose
+        "#a855f7",  # 5. Vivid Purple
+        "#38bdf8",  # 6. Electric Sky
+        "#34d399",  # 7. Fresh Mint
+        "#f97316",  # 8. Vibrant Tangerine
+        "#e879f9",  # 9. Neon Fuchsia
+        "#818cf8",  # 10. Electric Indigo
+        "#4ade80",  # 11. Spring Green
+        "#2dd4bf",  # 12. Aqua Teal
+        "#fb7185",  # 13. Coral Rose
+        "#c084fc",  # 14. Soft Lavender
+        "#facc15",  # 15. Bright Canary
+        "#67e8f9",  # 16. Ice Cyan
+        "#a3e635",  # 17. Electric Lime
+        "#fda4af",  # 18. Pale Rose
+        "#93c5fd",  # 19. Cornflower Blue
+        "#94a3b8",  # 20. Crisp Slate
     ]
     COLORS_LIGHT = [
-        "#059669",  # Deep Emerald
-        "#0891b2",  # Deep Cyan
-        "#d97706",  # Warm Amber
-        "#e11d48",  # Precision Rose
-        "#7e22ce",  # Purple
-        "#0284c7",  # Deep Sky
-        "#047857",  # Forest Mint
-        "#ea580c",  # Vivid Tangerine
-        "#c026d3",  # Fuchsia
-        "#4f46e5",  # Electric Indigo
-        "#16a34a",  # Forest Green
-        "#475569",  # Steel Slate
+        "#059669",  # 1. Deep Emerald
+        "#0891b2",  # 2. Deep Cyan
+        "#d97706",  # 3. Warm Amber
+        "#e11d48",  # 4. Precision Rose
+        "#7e22ce",  # 5. Purple
+        "#0284c7",  # 6. Deep Sky
+        "#047857",  # 7. Forest Mint
+        "#ea580c",  # 8. Vivid Tangerine
+        "#c026d3",  # 9. Fuchsia
+        "#4f46e5",  # 10. Electric Indigo
+        "#16a34a",  # 11. Forest Green
+        "#0f766e",  # 12. Deep Teal
+        "#be123c",  # 13. Deep Crimson
+        "#6b21a8",  # 14. Deep Violet
+        "#b45309",  # 15. Ochre Amber
+        "#0369a1",  # 16. Ocean Blue
+        "#4d7c0f",  # 17. Deep Olive
+        "#9f1239",  # 18. Deep Ruby
+        "#1d4ed8",  # 19. Royal Blue
+        "#475569",  # 20. Steel Slate
     ]
 
     def __init__(self, parent=None):
@@ -837,12 +853,14 @@ class LatencyChart(QWidget):
 
     def set_data(self, host_data, max_points, total_candidates=None):
         self.max_points = max(1, int(max_points))
-        # Display all hosts in live telemetry chart without artificial capping
+        # Cap to top 20 active hosts for high visual legibility and performance
         self.history = {}
         for host, data in host_data.items():
             if data.get("latencies"):
                 self.history[host] = list(data["latencies"])[-self.max_points:]
-        self.total_candidates = total_candidates if total_candidates is not None else len(self.history)
+                if len(self.history) >= self.MAX_HOSTS:
+                    break
+        self.total_candidates = total_candidates if total_candidates is not None else len(host_data)
         self.update()
 
     @staticmethod
@@ -870,8 +888,8 @@ class LatencyChart(QWidget):
         title_font.setStyleHint(QFont.SansSerif)
         title_font.setLetterSpacing(QFont.AbsoluteSpacing, 0.4)
         painter.setFont(title_font)
-        if len(self.history) > 1:
-            painter.drawText(16, 22, f"LATENCY TELEMETRY OSCILLOSCOPE ({len(self.history)} HOSTS)")
+        if self.total_candidates > self.MAX_HOSTS:
+            painter.drawText(16, 22, f"LATENCY TELEMETRY OSCILLOSCOPE (TOP {self.MAX_HOSTS} OF {self.total_candidates} HOSTS)")
         else:
             painter.drawText(16, 22, "LATENCY TELEMETRY OSCILLOSCOPE")
 
@@ -918,18 +936,13 @@ class LatencyChart(QWidget):
         painter.save()
         painter.setClipRect(plot)
 
-        # Dynamically scale line width and gradient fills for large fleets
-        line_w = 1.0 if n_hosts > 50 else (1.5 if n_hosts > 20 else 2.0)
-        show_gradients = n_hosts <= 30
-        dot_r = 1.5 if n_hosts > 50 else 2.5
-
         # Draw traces with smooth subtle gradients and anti-aliased lines
         for idx, (host, values) in enumerate(self.history.items()):
             if not values:
                 continue
             base_color = QColor(colors[idx % len(colors)])
             pen = QPen(base_color)
-            pen.setWidthF(line_w)
+            pen.setWidthF(1.8)
             pen.setCapStyle(Qt.RoundCap)
             pen.setJoinStyle(Qt.RoundJoin)
 
@@ -940,12 +953,12 @@ class LatencyChart(QWidget):
                 y = plot.bottom() - plot.height() * min(value, max_latency) / max_latency
                 points.append(QPointF(x, y))
 
-            # Subtle area gradient under trace (active when fleet <= 30 hosts)
-            if show_gradients and len(points) >= 2:
+            # Subtle area gradient under trace for aesthetic depth
+            if len(points) >= 2:
                 poly_points = [QPointF(points[0].x(), plot.bottom())] + points + [QPointF(points[-1].x(), plot.bottom())]
                 grad = QLinearGradient(0, plot.top(), 0, plot.bottom())
                 fill_color_top = QColor(base_color)
-                fill_color_top.setAlpha(24 if dark else 16)
+                fill_color_top.setAlpha(20 if dark else 14)
                 grad.setColorAt(0.0, fill_color_top)
                 fill_color_bot = QColor(base_color)
                 fill_color_bot.setAlpha(0)
@@ -960,11 +973,16 @@ class LatencyChart(QWidget):
             for i in range(1, len(points)):
                 painter.drawLine(points[i - 1], points[i])
 
-            # Endpoint live pulse dot
+            # Endpoint live pulse dot with glowing halo
             if points:
                 painter.setBrush(QBrush(base_color))
                 painter.setPen(Qt.NoPen)
-                painter.drawEllipse(points[-1], dot_r, dot_r)
+                painter.drawEllipse(points[-1], 2.5, 2.5)
+                halo_pen = QPen(base_color)
+                halo_pen.setWidthF(1.0)
+                painter.setPen(halo_pen)
+                painter.setBrush(Qt.NoBrush)
+                painter.drawEllipse(points[-1], 4.5, 4.5)
 
         painter.restore()
 
@@ -2922,16 +2940,25 @@ class PingMonitorApp(QMainWindow):
             self.host_count_label.setText(f"{up_count} up / {len(self.host_data)} total")
 
         # Exclude DNS resolution failures and unhandled probe errors from live telemetry chart.
-        # Include all active fleet targets in chart stream without artificial capping.
+        # Cap to top 20 active hosts for high visual legibility, clarity, and performance.
+        MAX_CHART_HOSTS = 20
         ordered_hosts = self.hosts if self.hosts else list(self.host_data.keys())
+        first_20_hosts = []
+        candidate_count = 0
+        for host in ordered_hosts:
+            data = self.host_data.get(host)
+            if not data or data.get("last_status") == "DNS Error":
+                continue
+            candidate_count += 1
+            if len(first_20_hosts) < MAX_CHART_HOSTS:
+                first_20_hosts.append(host)
+
         chart_targets = {
             h: self.host_data[h]
-            for h in ordered_hosts
-            if h in self.host_data
-            and self.host_data[h].get("last_status") in ("Connected", "No ICMP Reply")
-            and self.host_data[h].get("latencies")
+            for h in first_20_hosts
+            if self.host_data[h].get("last_status") in ("Connected", "No ICMP Reply")
         }
-        self.chart.set_data(chart_targets, self.graph_history_points, total_candidates=len(chart_targets))
+        self.chart.set_data(chart_targets, self.graph_history_points, total_candidates=candidate_count)
         self.update_dns_pill(dns_issue_count)
 
         pending_count = sum(

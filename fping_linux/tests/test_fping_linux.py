@@ -412,7 +412,7 @@ class TestDNSIssuesIsolationAndUI(unittest.TestCase):
         win.is_monitoring = False
         win.close()
 
-    def test_chart_renders_all_hosts_without_cap(self):
+    def test_chart_caps_at_top_20_hosts_for_legibility(self):
         win = PingMonitorApp()
         win.show()
         self.app.processEvents()
@@ -453,18 +453,18 @@ class TestDNSIssuesIsolationAndUI(unittest.TestCase):
         win.refresh_dashboard()
         self.app.processEvents()
 
-        # Latency chart renders all 120 resolvable hosts
-        self.assertEqual(len(win.chart.history), 120)
+        # Latency chart must strictly contain top 20 hosts for legibility
+        self.assertEqual(len(win.chart.history), 20)
         self.assertEqual(win.chart.total_candidates, 120)
 
-        # Must contain hosts throughout the fleet in the chart
-        self.assertIn("host_1.lan", win.chart.history)
-        self.assertIn("host_20.lan", win.chart.history)
-        self.assertIn("host_21.lan", win.chart.history)
-        self.assertIn("host_50.lan", win.chart.history)
-        self.assertIn("host_120.lan", win.chart.history)
+        # Must contain first 20 hosts (host_1..host_20)
+        for i in range(1, 21):
+            self.assertIn(f"host_{i}.lan", win.chart.history)
 
-        # DNS failed hosts must remain excluded
+        # Must NOT contain host 21 or beyond in the chart
+        self.assertNotIn("host_21.lan", win.chart.history)
+        self.assertNotIn("host_50.lan", win.chart.history)
+        self.assertNotIn("host_120.lan", win.chart.history)
         self.assertNotIn("dns_bad_1.corp", win.chart.history)
 
         # Repaint must execute without exception

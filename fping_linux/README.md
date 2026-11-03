@@ -15,7 +15,7 @@ Linux-only multi-host ICMP reachability and latency dashboard built with **PySid
 - **Multi-host monitoring** — one fping process schedules the full target list and reports both replies and timeouts; the application imposes no host concurrency ceiling
 - **DNS Issue Isolation & Multi-Check Verification** — hostnames with name resolution errors are vetted with multiple DNS lookups, isolated from the live telemetry stream and chart, and tracked in a dedicated DNS Inspector with live filtering, clipboard copy, and export
 - **Live dashboard** — status, sequence, latency, packet loss, consecutive failures with in-place cell updates
-- **Latency history chart** — rolling-window multi-host oscilloscope with dynamic per-host colours, adaptive line scaling, and live legend displaying all active monitored fleet targets in real-time
+- **Latency history chart** — rolling-window multi-host oscilloscope with 20 distinct high-contrast designer colours, area gradients, and glowing live pulse dots, focused on the top 20 active targets for maximum visual legibility and 60 FPS performance
 - **No-reply panel** — shows targets that did not answer ICMP; a timeout does not prove the host is offline
 - **High-performance table sorting** — $O(1)$ numeric sorting by column without regex parsing; clicking headers (including Packet Loss) sorts immediately without UI freezing, row shifting, or artificial ICMP latency spikes
 - **Host detail dialog** — double-click a row for stats + recent timeline
@@ -69,7 +69,7 @@ python fping_linux.py
 | **Live Telemetry Bar** | Live search filter placed directly alongside the **DNS Issues Pill Badge** (`⚠ X DNS Issues`) |
 | **DNS Inspector Dialog** | Opened via the DNS pill badge; displays all unresolvable hosts, detection timestamp, exact error reason, search bar, and one-click clipboard copy / CSV export |
 | **Live Telemetry Table** | Main streaming table with $O(1)$ smooth column sorting (Host, Status, Sequence, Latency, Loss %, Failures); unresolvable DNS hosts are excluded to keep telemetry clean |
-| **Latency History** | Custom high-performance rolling oscilloscope displaying real-time telemetry waveforms for all active fleet targets |
+| **Latency History** | Custom high-performance rolling oscilloscope displaying real-time telemetry waveforms for the top 20 active fleet targets for maximum visual clarity |
 | **No ICMP Reply** | Targets that returned no echo reply before timeout |
 | **Footer** | Summary counts, reachable targets, and aggregate loss percentage |
 
