@@ -46,6 +46,7 @@ network-monitoring-platform-brainstorm.md
 # Agents and local skills (kept local)
 .agents/
 .agent/
+.gsd/
 AntigravitySkills/
 
 # Generated reports and screenshots
