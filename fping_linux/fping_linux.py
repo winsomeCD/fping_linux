@@ -1042,35 +1042,56 @@ class BrandIconWidget(QWidget):
     def __init__(self, size: int = 34, parent=None):
         super().__init__(parent)
         self.setFixedSize(size, size)
+        self._dark = True
+
+    def set_dark(self, dark: bool):
+        self._dark = dark
+        self.update()
 
     def paintEvent(self, _event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
         w, h = float(self.width()), float(self.height())
+        dark = self._dark
 
-        # Rounded squircle background
+        # Rounded squircle background with adaptive theme gradient
         grad = QLinearGradient(0, 0, w, h)
-        grad.setColorAt(0.0, QColor("#242938"))
-        grad.setColorAt(1.0, QColor("#14171f"))
+        if dark:
+            grad.setColorAt(0.0, QColor("#242938"))
+            grad.setColorAt(1.0, QColor("#14171f"))
+            border_pen = QPen(QColor(62, 207, 142, 90), 1.2)
+            ring_pen1 = QPen(QColor(62, 207, 142, 45), 1)
+            ring_pen2 = QPen(QColor(62, 207, 142, 85), 1)
+            cross_pen = QPen(QColor(0, 229, 255, 130), 1)
+            center_color = QColor("#3ecf8e")
+        else:
+            grad.setColorAt(0.0, QColor("#f8fafc"))
+            grad.setColorAt(1.0, QColor("#e2e8f0"))
+            border_pen = QPen(QColor(5, 150, 105, 110), 1.2)
+            ring_pen1 = QPen(QColor(5, 150, 105, 45), 1)
+            ring_pen2 = QPen(QColor(5, 150, 105, 80), 1)
+            cross_pen = QPen(QColor(8, 145, 178, 120), 1)
+            center_color = QColor("#059669")
+
         painter.setBrush(QBrush(grad))
-        painter.setPen(QPen(QColor(62, 207, 142, 90), 1.2))
+        painter.setPen(border_pen)
         painter.drawRoundedRect(QRectF(1, 1, w - 2, h - 2), 8, 8)
 
         # Concentric radar rings
         cx, cy = w / 2.0, h / 2.0
         painter.setBrush(Qt.NoBrush)
-        painter.setPen(QPen(QColor(62, 207, 142, 45), 1))
+        painter.setPen(ring_pen1)
         painter.drawEllipse(QPointF(cx, cy), w * 0.35, h * 0.35)
-        painter.setPen(QPen(QColor(62, 207, 142, 85), 1))
+        painter.setPen(ring_pen2)
         painter.drawEllipse(QPointF(cx, cy), w * 0.20, h * 0.20)
 
         # Cyber crosshair sweep
-        painter.setPen(QPen(QColor(0, 229, 255, 130), 1))
+        painter.setPen(cross_pen)
         painter.drawLine(QPointF(cx, 4), QPointF(cx, h - 4))
         painter.drawLine(QPointF(4, cy), QPointF(w - 4, cy))
 
         # Glowing center radar target blip
-        painter.setBrush(QBrush(QColor("#3ecf8e")))
+        painter.setBrush(QBrush(center_color))
         painter.setPen(Qt.NoPen)
         painter.drawEllipse(QPointF(cx, cy), 2.5, 2.5)
 
