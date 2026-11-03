@@ -10,7 +10,7 @@ Linux-only multi-host ICMP reachability and latency dashboard built with **PySid
 
 ## Features
 
-- **CIDR Subnet Auto-Expansion** — directly enter subnets such as `10.128.7.0/24` or `192.168.1.0/28`; the input parser automatically expands usable host addresses (filtering network/broadcast addresses) while preserving your clean CIDR string in the UI input and saved config, protected by a safety prefix threshold (`/16` or smaller)
+- **CIDR Subnet Auto-Expansion** — directly enter subnets such as `10.128.7.0/24` or `192.168.1.0/28`; the input parser automatically expands usable host addresses (filtering network/broadcast addresses) while preserving your clean CIDR string in the UI input and saved config, protected by a safety prefix threshold (`/22` - max 1022 hosts)
 - **RFC 3550 Interarrival Jitter** — telemetry calculates compliant continuous network jitter in target inspection
 - **Multi-host monitoring** — one fping process schedules the full target list and reports both replies and timeouts; the application imposes no host concurrency ceiling
 - **DNS Issue Isolation & Multi-Check Verification** — hostnames with name resolution errors are vetted with multiple DNS lookups, isolated from the live telemetry stream and chart, and tracked in a dedicated DNS Inspector with live filtering, clipboard copy, and export

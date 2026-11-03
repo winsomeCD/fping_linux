@@ -76,21 +76,18 @@ class TestNormalizeTargets(unittest.TestCase):
         self.assertEqual(targets[0], "10.128.7.1")
         self.assertEqual(targets[-1], "10.128.7.254")
 
-    def test_cidr_safety_threshold_16_allowed(self):
-        # /20 is 4094 hosts, /16 is allowed as user requested
-        targets, dupes = normalize_targets("192.168.16.0/28")
-        self.assertEqual(len(targets), 14)
+    def test_cidr_safety_threshold_22_allowed(self):
+        # /22 generates 1022 usable hosts
+        targets, dupes = normalize_targets("10.0.0.0/22")
+        self.assertEqual(len(targets), 1022)
         self.assertEqual(dupes, 0)
 
-    def test_cidr_safety_threshold_16_exceeded(self):
-        # Prefixes broader than /16 (e.g. /15, /8, /0) must be rejected
-        with self.assertRaises(ValueError) as ctx:
-            normalize_targets("10.0.0.0/15")
-        self.assertIn("/16", str(ctx.exception))
-
-        with self.assertRaises(ValueError) as ctx:
-            normalize_targets("10.0.0.0/8")
-        self.assertIn("/16", str(ctx.exception))
+    def test_cidr_safety_threshold_22_exceeded(self):
+        # Prefixes broader than /22 (e.g. /21, /16, /8, /0) must be rejected
+        for prefix in (21, 16, 15, 8):
+            with self.assertRaises(ValueError) as ctx:
+                normalize_targets(f"10.0.0.0/{prefix}")
+            self.assertIn("/22", str(ctx.exception))
 
     def test_cidr_boundary_31_and_32(self):
         targets_31, _ = normalize_targets("192.168.1.0/31")

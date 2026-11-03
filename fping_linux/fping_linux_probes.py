@@ -89,10 +89,10 @@ def normalize_targets(raw_targets: str) -> tuple[list[str], int]:
                 raise ValueError(f"Invalid CIDR subnet notation or target format: {target!r}")
 
             if net.version == 4:
-                if net.prefixlen < 16:
+                if net.prefixlen < 22:
                     raise ValueError(
-                        f"CIDR prefix /{net.prefixlen} for '{target}' exceeds safe limit (/16). "
-                        "Subnets broader than /16 are not permitted for ICMP ping sweeps."
+                        f"CIDR prefix /{net.prefixlen} for '{target}' exceeds safe GUI limit (/22 - max 1022 hosts). "
+                        "Subnets broader than /22 are not permitted for live ICMP monitoring."
                     )
                 if net.num_addresses > 2:
                     expanded = [str(ip) for ip in net.hosts()]
