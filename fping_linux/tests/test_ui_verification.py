@@ -59,6 +59,7 @@ class TestVerification(unittest.TestCase):
         with patch.object(win.probe_pool, "start"):
             win.toggle_monitoring()
         self.app.processEvents()
+        win.refresh_dashboard()
 
         win._handle_probe_result(win._run_id, "8.8.8.8", ProbeResult("Connected", 14.5))
         win._handle_probe_result(win._run_id, "1.1.1.1", ProbeResult("No ICMP Reply", None))
@@ -88,6 +89,42 @@ class TestVerification(unittest.TestCase):
         win.host_data.clear()
         win.update_footer_stats()
         self.assertEqual(win.card_fleet.lbl_val.text(), "0 Targets")
+        win.close()
+
+    def test_cidr_ui_workflow(self):
+        win = PingMonitorApp()
+        win.show()
+        win.resize(1200, 800)
+        self.app.processEvents()
+
+        win._fallback_notice_shown = True
+        win._msg = lambda *args, **kwargs: None
+        # User enters CIDR in host input
+        win.host_entry.setText("10.128.7.0/24")
+
+        with patch.object(win.probe_pool, "start"):
+            win.toggle_monitoring()
+        self.app.processEvents()
+        win.refresh_dashboard()
+
+        # Check that 254 targets were generated internally
+        self.assertEqual(len(win.hosts), 254)
+        self.assertEqual(win.hosts[0], "10.128.7.1")
+        self.assertEqual(win.hosts[-1], "10.128.7.254")
+
+        # Check that user's host_entry text was NOT wiped or replaced with 254 items
+        self.assertEqual(win.host_entry.text(), "10.128.7.0/24")
+
+        # Fleet card shows 254 targets
+        self.assertEqual(win.card_fleet.lbl_val.text(), "254 Targets")
+
+        # Stop monitoring
+        win._confirm = lambda *args: False
+        win.stop_monitoring()
+        self.app.processEvents()
+
+        # host_entry remains clean CIDR
+        self.assertEqual(win.host_entry.text(), "10.128.7.0/24")
         win.close()
 
 

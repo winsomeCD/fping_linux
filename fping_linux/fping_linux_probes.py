@@ -3,6 +3,7 @@
 import asyncio
 import ipaddress
 import json
+import math
 import os
 import re
 import shutil
@@ -33,8 +34,40 @@ class ProbeResult:
     packet_sent: bool = True
 
 
+def calculate_rfc3550_jitter(latencies: Sequence[float]) -> float:
+    """Calculate interarrival jitter according to RFC 3550 / RFC 1889.
+
+    Formula: J_i = J_{i-1} + (|D(i-1, i)| - J_{i-1}) / 16
+    """
+    valid = [float(val) for val in latencies if val is not None and val >= 0]
+    if len(valid) < 2:
+        return 0.0
+    jitter = 0.0
+    for i in range(1, len(valid)):
+        diff = abs(valid[i] - valid[i - 1])
+        jitter += (diff - jitter) / 16.0
+    return round(jitter, 2)
+
+
+def calculate_percentile(values: Sequence[float], percentile: float = 95.0) -> float:
+    """Calculate the p-th percentile of a numerical sample."""
+    valid = sorted([float(v) for v in values if v is not None and v >= 0])
+    if not valid:
+        return 0.0
+    if len(valid) == 1:
+        return round(valid[0], 2)
+    k = (len(valid) - 1) * (percentile / 100.0)
+    floor_idx = int(math.floor(k))
+    ceil_idx = int(math.ceil(k))
+    if floor_idx == ceil_idx:
+        return round(valid[floor_idx], 2)
+    d0 = valid[floor_idx] * (ceil_idx - k)
+    d1 = valid[ceil_idx] * (k - floor_idx)
+    return round(d0 + d1, 2)
+
+
 def normalize_targets(raw_targets: str) -> tuple[list[str], int]:
-    """Return unique targets and the number of duplicate entries removed."""
+    """Return unique targets and the number of duplicate entries removed, with CIDR subnet expansion."""
     raw_tokens = re.split(r"[\r\n\t,]+", raw_targets)
     targets = [target.strip() for target in raw_tokens if target.strip()]
     unique_targets = []
@@ -48,12 +81,44 @@ def normalize_targets(raw_targets: str) -> tuple[list[str], int]:
             raise ValueError(f"Target contains invalid control characters: {target!r}")
         if len(target) > 255:
             raise ValueError(f"Target exceeds maximum allowed length of 255 characters: {target[:30]}...")
-        normalized = target.casefold()
-        if normalized in seen:
-            duplicate_count += 1
-            continue
-        seen.add(normalized)
-        unique_targets.append(target)
+
+        if "/" in target:
+            try:
+                net = ipaddress.ip_network(target, strict=False)
+            except ValueError:
+                raise ValueError(f"Invalid CIDR subnet notation or target format: {target!r}")
+
+            if net.version == 4:
+                if net.prefixlen < 16:
+                    raise ValueError(
+                        f"CIDR prefix /{net.prefixlen} for '{target}' exceeds safe limit (/16). "
+                        "Subnets broader than /16 are not permitted for ICMP ping sweeps."
+                    )
+                if net.num_addresses > 2:
+                    expanded = [str(ip) for ip in net.hosts()]
+                else:
+                    expanded = [str(ip) for ip in net]
+            else:
+                if net.prefixlen < 120:
+                    raise ValueError(
+                        f"IPv6 CIDR prefix /{net.prefixlen} for '{target}' exceeds safe limit (/120)."
+                    )
+                expanded = [str(ip) for ip in net]
+
+            for ip_str in expanded:
+                normalized = ip_str.casefold()
+                if normalized in seen:
+                    duplicate_count += 1
+                    continue
+                seen.add(normalized)
+                unique_targets.append(ip_str)
+        else:
+            normalized = target.casefold()
+            if normalized in seen:
+                duplicate_count += 1
+                continue
+            seen.add(normalized)
+            unique_targets.append(target)
 
     return unique_targets, duplicate_count
 
