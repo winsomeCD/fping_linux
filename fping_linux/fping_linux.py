@@ -793,7 +793,7 @@ class DNSIssuesDialog(QDialog):
 # Latency Chart
 # ---------------------------------------------------------------------------
 class LatencyChart(QWidget):
-    MAX_HOSTS = 20
+    MAX_HOSTS = None
     COLORS_DARK = [
         "#3ecf8e",  # Supabase Emerald
         "#00e5ff",  # Cyber Cyan
@@ -837,14 +837,12 @@ class LatencyChart(QWidget):
 
     def set_data(self, host_data, max_points, total_candidates=None):
         self.max_points = max(1, int(max_points))
-        # Cap to first 20 hosts to prevent UI lag and resource exhaustion
+        # Display all hosts in live telemetry chart without artificial capping
         self.history = {}
         for host, data in host_data.items():
             if data.get("latencies"):
                 self.history[host] = list(data["latencies"])[-self.max_points:]
-                if len(self.history) >= self.MAX_HOSTS:
-                    break
-        self.total_candidates = total_candidates if total_candidates is not None else len(host_data)
+        self.total_candidates = total_candidates if total_candidates is not None else len(self.history)
         self.update()
 
     @staticmethod
@@ -872,8 +870,8 @@ class LatencyChart(QWidget):
         title_font.setStyleHint(QFont.SansSerif)
         title_font.setLetterSpacing(QFont.AbsoluteSpacing, 0.4)
         painter.setFont(title_font)
-        if self.total_candidates > self.MAX_HOSTS:
-            painter.drawText(16, 22, f"LATENCY TELEMETRY OSCILLOSCOPE (FIRST {self.MAX_HOSTS} OF {self.total_candidates} HOSTS)")
+        if len(self.history) > 1:
+            painter.drawText(16, 22, f"LATENCY TELEMETRY OSCILLOSCOPE ({len(self.history)} HOSTS)")
         else:
             painter.drawText(16, 22, "LATENCY TELEMETRY OSCILLOSCOPE")
 
@@ -920,13 +918,18 @@ class LatencyChart(QWidget):
         painter.save()
         painter.setClipRect(plot)
 
+        # Dynamically scale line width and gradient fills for large fleets
+        line_w = 1.0 if n_hosts > 50 else (1.5 if n_hosts > 20 else 2.0)
+        show_gradients = n_hosts <= 30
+        dot_r = 1.5 if n_hosts > 50 else 2.5
+
         # Draw traces with smooth subtle gradients and anti-aliased lines
         for idx, (host, values) in enumerate(self.history.items()):
             if not values:
                 continue
             base_color = QColor(colors[idx % len(colors)])
             pen = QPen(base_color)
-            pen.setWidth(2)
+            pen.setWidthF(line_w)
             pen.setCapStyle(Qt.RoundCap)
             pen.setJoinStyle(Qt.RoundJoin)
 
@@ -937,8 +940,8 @@ class LatencyChart(QWidget):
                 y = plot.bottom() - plot.height() * min(value, max_latency) / max_latency
                 points.append(QPointF(x, y))
 
-            # Subtle area gradient under trace
-            if len(points) >= 2:
+            # Subtle area gradient under trace (active when fleet <= 30 hosts)
+            if show_gradients and len(points) >= 2:
                 poly_points = [QPointF(points[0].x(), plot.bottom())] + points + [QPointF(points[-1].x(), plot.bottom())]
                 grad = QLinearGradient(0, plot.top(), 0, plot.bottom())
                 fill_color_top = QColor(base_color)
@@ -961,7 +964,7 @@ class LatencyChart(QWidget):
             if points:
                 painter.setBrush(QBrush(base_color))
                 painter.setPen(Qt.NoPen)
-                painter.drawEllipse(points[-1], 2.5, 2.5)
+                painter.drawEllipse(points[-1], dot_r, dot_r)
 
         painter.restore()
 
@@ -2919,25 +2922,16 @@ class PingMonitorApp(QMainWindow):
             self.host_count_label.setText(f"{up_count} up / {len(self.host_data)} total")
 
         # Exclude DNS resolution failures and unhandled probe errors from live telemetry chart.
-        # Cap to first 20 hosts to maintain ultra-smooth UI performance and prevent resource exhaustion.
-        MAX_CHART_HOSTS = 20
+        # Include all active fleet targets in chart stream without artificial capping.
         ordered_hosts = self.hosts if self.hosts else list(self.host_data.keys())
-        first_20_hosts = []
-        candidate_count = 0
-        for host in ordered_hosts:
-            data = self.host_data.get(host)
-            if not data or data.get("last_status") == "DNS Error":
-                continue
-            candidate_count += 1
-            if len(first_20_hosts) < MAX_CHART_HOSTS:
-                first_20_hosts.append(host)
-
         chart_targets = {
             h: self.host_data[h]
-            for h in first_20_hosts
-            if self.host_data[h].get("last_status") in ("Connected", "No ICMP Reply")
+            for h in ordered_hosts
+            if h in self.host_data
+            and self.host_data[h].get("last_status") in ("Connected", "No ICMP Reply")
+            and self.host_data[h].get("latencies")
         }
-        self.chart.set_data(chart_targets, self.graph_history_points, total_candidates=candidate_count)
+        self.chart.set_data(chart_targets, self.graph_history_points, total_candidates=len(chart_targets))
         self.update_dns_pill(dns_issue_count)
 
         pending_count = sum(
