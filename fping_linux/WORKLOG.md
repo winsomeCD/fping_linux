@@ -11,6 +11,31 @@ This is a concise engineering record rather than a verbatim transcript: it
 preserves requests, decisions, relevant findings, and outcomes while omitting
 routine tool output.
 
+## 2026-11-11 — DNS Resolution Retry Implementation & GUI Event Loop Throttling
+
+### User request
+
+Review the `fping_linux` codebase using Ponytail and fix findings 1 and 2:
+1. Implement the background DNS retry loop and table restoration for recovered hosts.
+2. Eliminate UI freezes on large fleets by throttling footer stats updates to the periodic dashboard timer.
+
+### Investigation & Code Changes
+
+1. **Background DNS Retry Loop & Host Recovery**:
+   - `fping_linux_probes.py`: Implemented `_retry_failed_dns_loop` in `ProbeTask` running concurrently alongside the probe engine. On retry cycles, it invalidates negative cache entries and attempts re-resolution for unresolved targets.
+   - Added `_probe_single_target` and `_probe_fallback_target` to immediately probe newly resolved hosts.
+   - `fping_linux.py`: Updated `update_row` to automatically re-insert recovered DNS hosts back into `self.table` and decrements the DNS pill badge.
+2. **GUI Event Loop Throttling**:
+   - `fping_linux.py`: Removed unthrottled `self.update_footer_stats()` calls from raw packet arrival handler (`_handle_probe_result`).
+   - Summary statistics and MetricCards are updated once per second via the existing `refresh_dashboard()` `QTimer`.
+
+### Verification
+
+- Added regression tests in `tests/test_fping_linux.py`:
+  - `test_dns_error_host_recovery_reinserts_into_table`
+  - `test_footer_stats_throttled_to_dashboard_refresh`
+- All 46 automated unit tests passed in 1.44s.
+
 ## 2026-10-16 — Architecture Modernization, Dynamic DNS Retry Loop, and Obsidian Precision Telemetry UI Overhaul
 
 ### User request

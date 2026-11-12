@@ -2793,9 +2793,13 @@ class PingMonitorApp(QMainWindow):
         del data["log_rows"][:-self.MAX_LOG_ENTRIES]
 
         if status == "DNS Error":
+            data["had_dns_error"] = True
             self.remove_host_row(target)
             self.update_dns_pill()
         else:
+            if data.get("had_dns_error"):
+                data["had_dns_error"] = False
+                self.update_dns_pill()
             loss_pct = (
                 round(((data["sent"] - data["received"]) / data["sent"]) * 100, 1)
                 if data["sent"] else None
@@ -2825,7 +2829,6 @@ class PingMonitorApp(QMainWindow):
                 5: data["consecutive_fails"],
             }
             self.update_row(target, row_values, sort_values=sort_values)
-        self.update_footer_stats()
 
     def set_controls_enabled(self, enabled):
         self.host_entry.setEnabled(enabled)
@@ -2857,7 +2860,13 @@ class PingMonitorApp(QMainWindow):
     def update_row(self, host, values, sort_values=None):
         col0_item = self._host_items.get(host)
         if col0_item is None:
-            return
+            # Re-insert row if host was previously removed (e.g. recovering from a DNS Error)
+            row = self.table.rowCount()
+            self.table.insertRow(row)
+            col0_item = SortableTableWidgetItem(str(values[0]))
+            col0_item.setTextAlignment(Qt.AlignCenter)
+            self.table.setItem(row, 0, col0_item)
+            self._host_items[host] = col0_item
         row = col0_item.row()
         if row < 0:
             return

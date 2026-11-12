@@ -669,6 +669,71 @@ class ProbeTask(QRunnable):
 
         return targets_by_address, failed_targets
 
+    async def _retry_failed_dns_loop(
+        self,
+        failed_targets: set[str],
+        targets_by_address: dict[str, list[str]],
+    ):
+        """Periodically re-attempt DNS resolution for targets that failed at startup."""
+        retry_interval = max(3.0, min(10.0, self.interval * 3))
+        while not self._async_stop_event.is_set() and failed_targets:
+            try:
+                await asyncio.wait_for(self._async_stop_event.wait(), timeout=retry_interval)
+                break
+            except asyncio.TimeoutError:
+                pass
+
+            for target in list(failed_targets):
+                if self._async_stop_event.is_set():
+                    break
+                try:
+                    self._dns_resolver._negative_cache.pop(target, None)
+                    ip = await self._dns_resolver.resolve(target, retries=1)
+                    if ip:
+                        failed_targets.discard(target)
+                        if ip in targets_by_address:
+                            targets_by_address[ip].append(target)
+                        else:
+                            targets_by_address.setdefault(ip, []).append(target)
+                            if self._fping_executable:
+                                asyncio.create_task(self._probe_single_target(target, ip))
+                            elif self._icmp_session:
+                                asyncio.create_task(self._probe_fallback_target(target, ip))
+                except Exception:
+                    pass
+
+    async def _probe_single_target(self, target: str, ip: str):
+        if not self._fping_executable:
+            return
+        cmd = [self._fping_executable, "-c", "1", "-t", str(int(self.timeout * 1000)), "-b", str(self.payload_size), ip]
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, _ = await proc.communicate()
+            aliases = {ip.casefold(): ip}
+            for line in stdout.splitlines():
+                parsed = parse_fping_text_line(line, aliases)
+                if parsed:
+                    _, res = parsed
+                    self.signals.completed.emit(self.run_id, target, res)
+                    return
+            self.signals.completed.emit(self.run_id, target, ProbeResult("No ICMP Reply"))
+        except Exception as e:
+            self.signals.completed.emit(self.run_id, target, ProbeResult("Probe Error", error=str(e), packet_sent=False))
+
+    async def _probe_fallback_target(self, target: str, ip: str):
+        if not self._icmp_session:
+            return
+        try:
+            latency = await self._icmp_session.ping(ip, self.timeout)
+            res = ProbeResult("Connected", latency) if latency is not None else ProbeResult("No ICMP Reply")
+        except Exception as e:
+            res = ProbeResult("Probe Error", error=str(e), packet_sent=False)
+        self.signals.completed.emit(self.run_id, target, res)
+
     async def _run_fallback_engine(self):
         """Fallback to internal AsyncICMPSession when fping is not installed."""
         targets_by_address, failed_targets = await self._resolve_targets()
@@ -738,6 +803,12 @@ class ProbeTask(QRunnable):
                     except asyncio.TimeoutError:
                         pass
 
+        retry_task: asyncio.Task | None = None
+        if failed_targets:
+            retry_task = asyncio.create_task(
+                self._retry_failed_dns_loop(failed_targets, targets_by_address)
+            )
+
         try:
             tasks = [
                 _monitor_one(target, idx * stagger_step)
@@ -745,6 +816,9 @@ class ProbeTask(QRunnable):
             ]
             await asyncio.gather(*tasks)
         finally:
+            if retry_task is not None and not retry_task.done():
+                retry_task.cancel()
+                await asyncio.gather(retry_task, return_exceptions=True)
             self._icmp_session.close()
             self._icmp_session = None
 
@@ -754,7 +828,16 @@ class ProbeTask(QRunnable):
         if self._async_stop_event.is_set():
             return True
         if not targets_by_address:
-            await self._async_stop_event.wait()
+            if failed_targets:
+                retry_task = asyncio.create_task(
+                    self._retry_failed_dns_loop(failed_targets, targets_by_address)
+                )
+                await self._async_stop_event.wait()
+                if not retry_task.done():
+                    retry_task.cancel()
+                await asyncio.gather(retry_task, return_exceptions=True)
+            else:
+                await self._async_stop_event.wait()
             return True
 
         resolved_targets = [
@@ -762,6 +845,12 @@ class ProbeTask(QRunnable):
             for targets in targets_by_address.values()
             for target in targets
         ]
+
+        retry_task: asyncio.Task | None = None
+        if failed_targets:
+            retry_task = asyncio.create_task(
+                self._retry_failed_dns_loop(failed_targets, targets_by_address)
+            )
 
         period_ms, timeout_ms, send_gap_ms = calculate_fping_timing(
             len(resolved_targets), self.interval, self.timeout, self.send_gap_ms
@@ -869,6 +958,9 @@ class ProbeTask(QRunnable):
         await asyncio.gather(reader_task, return_exceptions=True)
         stop_task.cancel()
         await asyncio.gather(stop_task, return_exceptions=True)
+        if retry_task is not None and not retry_task.done():
+            retry_task.cancel()
+            await asyncio.gather(retry_task, return_exceptions=True)
         stderr = (await stderr_task).decode(errors="replace").strip()
 
         if results_seen == 0 and not self._async_stop_event.is_set():

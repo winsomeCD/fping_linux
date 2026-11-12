@@ -747,6 +747,89 @@ class TestDNSIssuesIsolationAndUI(unittest.TestCase):
 
         win.close()
 
+    def test_dns_error_host_recovery_reinserts_into_table(self):
+        win = PingMonitorApp()
+        win._msg = lambda *args, **kwargs: None
+        win._confirm = lambda *args: False
+        win.show()
+        self.app.processEvents()
+
+        target = "flaky.domain"
+        win._run_id = 88
+        win.is_monitoring = True
+        win.host_data[target] = {
+            "sent": 0, "received": 0, "checks": 0,
+            "latencies": [], "latency_count": 0,
+            "latency_sum": 0.0, "min_latency": None, "max_latency": None,
+            "timeline_stats": [], "log_rows": [], "last_status": None,
+            "last_error": None, "consecutive_fails": 0, "last_down_time": "-",
+        }
+        win.table.setRowCount(1)
+        item = SortableTableWidgetItem(target)
+        win.table.setItem(0, 0, item)
+        win._host_items[target] = item
+
+        # 1. DNS fails: removed from table
+        win._handle_probe_result(88, target, ProbeResult("DNS Error", error="Timeout", packet_sent=False))
+        self.assertEqual(win.table.rowCount(), 0)
+        self.assertNotIn(target, win._host_items)
+        self.assertEqual(win.dns_issues_btn.text(), "⚠ 1 DNS Issue")
+
+        # 2. DNS recovers: re-inserted into table
+        win._handle_probe_result(88, target, ProbeResult("Connected", 14.5, packet_sent=True))
+        self.assertEqual(win.table.rowCount(), 1)
+        self.assertIn(target, win._host_items)
+        self.assertEqual(win.table.item(0, 0).text(), target)
+        self.assertIn("Connected", win.table.item(0, 1).text())
+
+        # 3. Dashboard refresh updates DNS pill
+        win.refresh_dashboard()
+        self.assertEqual(win.dns_issues_btn.text(), "0 DNS Issues")
+
+        win.is_monitoring = False
+        win.close()
+
+    def test_footer_stats_throttled_to_dashboard_refresh(self):
+        win = PingMonitorApp()
+        win._msg = lambda *args, **kwargs: None
+        win._confirm = lambda *args: False
+        win.show()
+        self.app.processEvents()
+
+        target = "srv1.local"
+        win._run_id = 99
+        win.is_monitoring = True
+        win.host_data[target] = {
+            "sent": 0, "received": 0, "checks": 0,
+            "latencies": [], "latency_count": 0,
+            "latency_sum": 0.0, "min_latency": None, "max_latency": None,
+            "timeline_stats": [], "log_rows": [], "last_status": None,
+            "last_error": None, "consecutive_fails": 0, "last_down_time": "-",
+        }
+        win.table.setRowCount(1)
+        item = SortableTableWidgetItem(target)
+        win.table.setItem(0, 0, item)
+        win._host_items[target] = item
+
+        called_count = 0
+        original_update_footer = win.update_footer_stats
+        def mock_footer():
+            nonlocal called_count
+            called_count += 1
+            original_update_footer()
+        win.update_footer_stats = mock_footer
+
+        # Sending packet result should NOT trigger update_footer_stats directly
+        win._handle_probe_result(99, target, ProbeResult("Connected", 11.2, packet_sent=True))
+        self.assertEqual(called_count, 0)
+
+        # refresh_dashboard should trigger update_footer_stats
+        win.refresh_dashboard()
+        self.assertEqual(called_count, 1)
+
+        win.is_monitoring = False
+        win.close()
+
 
 if __name__ == "__main__":
     unittest.main()
