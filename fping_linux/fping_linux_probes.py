@@ -603,6 +603,7 @@ class AsyncICMPSession:
 
 class ProbeSignals(QObject):
     completed = Signal(int, str, object)
+    batch_completed = Signal(int, list)
     finished = Signal(int)
 
 
@@ -631,6 +632,9 @@ class ProbeTask(QRunnable):
         self._loop: asyncio.AbstractEventLoop | None = None
         self._async_stop_event: asyncio.Event | None = None
         self._icmp_session: AsyncICMPSession | None = None
+        self._result_queue: asyncio.Queue | None = None
+        self._fping_executable: str | None = None
+        self._fping_json: bool = False
 
     def request_stop(self):
         self._stop_requested.set()
@@ -643,6 +647,28 @@ class ProbeTask(QRunnable):
                 self._loop.call_soon_threadsafe(self._async_stop_event.set)
             except RuntimeError:
                 pass
+
+    async def _emit_result(self, target: str, result: ProbeResult):
+        self.signals.completed.emit(self.run_id, target, result)
+        if self._result_queue is not None:
+            await self._result_queue.put((target, result))
+
+    async def _flusher(self):
+        while not self._async_stop_event.is_set() or (self._result_queue and not self._result_queue.empty()):
+            batch = []
+            try:
+                first = await asyncio.wait_for(self._result_queue.get(), timeout=0.05)
+                batch.append(first)
+                self._result_queue.task_done()
+                while not self._result_queue.empty() and len(batch) < 100:
+                    batch.append(self._result_queue.get_nowait())
+                    self._result_queue.task_done()
+            except (asyncio.TimeoutError, asyncio.CancelledError):
+                pass
+            if batch:
+                self.signals.batch_completed.emit(self.run_id, batch)
+            if self._async_stop_event.is_set() and (self._result_queue is None or self._result_queue.empty()):
+                break
 
     async def _resolve_targets(self) -> tuple[dict[str, list[str]], set[str]]:
         """Resolve hostnames concurrently with multi-check verification and return mapped targets plus failed targets."""
@@ -661,8 +687,7 @@ class ProbeTask(QRunnable):
                     failed_targets.add(target)
                     attempts, err_msg = self._dns_resolver.get_resolution_info(target)
                     err_desc = err_msg or f"Could not resolve '{target}' after {attempts} DNS checks"
-                    self.signals.completed.emit(
-                        self.run_id,
+                    await self._emit_result(
                         target,
                         ProbeResult("DNS Error", error=err_desc, packet_sent=False),
                     )
@@ -695,44 +720,54 @@ class ProbeTask(QRunnable):
                             targets_by_address[ip].append(target)
                         else:
                             targets_by_address.setdefault(ip, []).append(target)
-                            if self._fping_executable:
-                                asyncio.create_task(self._probe_single_target(target, ip))
-                            elif self._icmp_session:
-                                asyncio.create_task(self._probe_fallback_target(target, ip))
+                        asyncio.create_task(self._monitor_single_recovered_target(target, ip))
                 except Exception:
                     pass
 
+    async def _monitor_single_recovered_target(self, target: str, ip: str):
+        """Continuously monitor a target that recovered from a startup DNS failure."""
+        loop = asyncio.get_running_loop()
+        while not self._async_stop_event.is_set():
+            started = loop.time()
+            if self._icmp_session:
+                try:
+                    latency = await self._icmp_session.ping(ip, self.timeout)
+                    res = ProbeResult("Connected", latency) if latency is not None else ProbeResult("No ICMP Reply")
+                except Exception as e:
+                    res = ProbeResult("Probe Error", error=str(e), packet_sent=False)
+            elif self._fping_executable:
+                cmd = [self._fping_executable, "-c", "1", "-t", str(int(self.timeout * 1000)), "-b", str(self.payload_size), ip]
+                try:
+                    proc = await asyncio.create_subprocess_exec(
+                        *cmd,
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE,
+                    )
+                    stdout, _ = await proc.communicate()
+                    aliases = {ip.casefold(): ip}
+                    res = ProbeResult("No ICMP Reply")
+                    for line in stdout.splitlines():
+                        parsed = parse_fping_text_line(line, aliases)
+                        if parsed:
+                            _, res = parsed
+                            break
+                except Exception as e:
+                    res = ProbeResult("Probe Error", error=str(e), packet_sent=False)
+            else:
+                break
+            await self._emit_result(target, res)
+            delay = max(0.0, self.interval - (loop.time() - started))
+            if delay:
+                try:
+                    await asyncio.wait_for(self._async_stop_event.wait(), timeout=delay)
+                except asyncio.TimeoutError:
+                    pass
+
     async def _probe_single_target(self, target: str, ip: str):
-        if not self._fping_executable:
-            return
-        cmd = [self._fping_executable, "-c", "1", "-t", str(int(self.timeout * 1000)), "-b", str(self.payload_size), ip]
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            stdout, _ = await proc.communicate()
-            aliases = {ip.casefold(): ip}
-            for line in stdout.splitlines():
-                parsed = parse_fping_text_line(line, aliases)
-                if parsed:
-                    _, res = parsed
-                    self.signals.completed.emit(self.run_id, target, res)
-                    return
-            self.signals.completed.emit(self.run_id, target, ProbeResult("No ICMP Reply"))
-        except Exception as e:
-            self.signals.completed.emit(self.run_id, target, ProbeResult("Probe Error", error=str(e), packet_sent=False))
+        await self._monitor_single_recovered_target(target, ip)
 
     async def _probe_fallback_target(self, target: str, ip: str):
-        if not self._icmp_session:
-            return
-        try:
-            latency = await self._icmp_session.ping(ip, self.timeout)
-            res = ProbeResult("Connected", latency) if latency is not None else ProbeResult("No ICMP Reply")
-        except Exception as e:
-            res = ProbeResult("Probe Error", error=str(e), packet_sent=False)
-        self.signals.completed.emit(self.run_id, target, res)
+        await self._monitor_single_recovered_target(target, ip)
 
     async def _run_fallback_engine(self):
         """Fallback to internal AsyncICMPSession when fping is not installed."""
@@ -754,8 +789,7 @@ class ProbeTask(QRunnable):
         session_started = await self._icmp_session.start()
         if not session_started:
             for target in resolved_targets:
-                self.signals.completed.emit(
-                    self.run_id,
+                await self._emit_result(
                     target,
                     ProbeResult("Permission Denied", error="Raw ICMP socket permission denied.", packet_sent=False),
                 )
@@ -788,12 +822,12 @@ class ProbeTask(QRunnable):
                         res = ProbeResult("No ICMP Reply")
                 except NameLookupError as err:
                     res = ProbeResult("DNS Error", error=str(err), packet_sent=False)
-                    self.signals.completed.emit(self.run_id, target, res)
+                    await self._emit_result(target, res)
                     return
                 except Exception as err:
                     res = ProbeResult("Probe Error", error=str(err), packet_sent=False)
 
-                self.signals.completed.emit(self.run_id, target, res)
+                await self._emit_result(target, res)
                 if self._async_stop_event.is_set():
                     return
                 delay = max(0.0, self.interval - (loop.time() - started))
@@ -872,8 +906,8 @@ class ProbeTask(QRunnable):
             )
         except OSError as error:
             for target in resolved_targets:
-                self.signals.completed.emit(
-                    self.run_id, target,
+                await self._emit_result(
+                    target,
                     ProbeResult("Probe Error", error=f"Could not start fping: {error}", packet_sent=False),
                 )
             return False
@@ -897,7 +931,7 @@ class ProbeTask(QRunnable):
                 address, result = parsed
                 results_seen += 1
                 for target in targets_by_address.get(address, []):
-                    self.signals.completed.emit(self.run_id, target, result)
+                    await self._emit_result(target, result)
 
         reader_task = asyncio.create_task(consume_results())
 
@@ -929,8 +963,8 @@ class ProbeTask(QRunnable):
             stderr = (await stderr_task).decode(errors="replace").strip()
             error_text = stderr or f"Could not send target list to fping: {error}"
             for target in resolved_targets:
-                self.signals.completed.emit(
-                    self.run_id, target,
+                await self._emit_result(
+                    target,
                     ProbeResult("Probe Error", error=error_text, packet_sent=False),
                 )
             return True
@@ -966,16 +1000,16 @@ class ProbeTask(QRunnable):
         if results_seen == 0 and not self._async_stop_event.is_set():
             error_text = stderr or f"fping exited with code {process.returncode} before returning results"
             for target in resolved_targets:
-                self.signals.completed.emit(
-                    self.run_id, target,
+                await self._emit_result(
+                    target,
                     ProbeResult("Probe Error", error=error_text, packet_sent=False),
                 )
             return True
         if process.returncode not in (0, 1, -15) and not self._async_stop_event.is_set():
             error_text = stderr or f"fping exited with code {process.returncode}"
             for target in resolved_targets:
-                self.signals.completed.emit(
-                    self.run_id, target,
+                await self._emit_result(
+                    target,
                     ProbeResult("Probe Error", error=error_text, packet_sent=False),
                 )
         return True
@@ -983,18 +1017,33 @@ class ProbeTask(QRunnable):
     async def _run(self):
         self._loop = asyncio.get_running_loop()
         self._async_stop_event = asyncio.Event()
+        self._result_queue = asyncio.Queue()
+        flusher_task = asyncio.create_task(self._flusher())
         if self._stop_requested.is_set():
             self._async_stop_event.set()
 
-        info = fping_info()
-        if info is not None:
-            self._fping_executable, self._fping_json = info
-            success = await self._run_fping()
-            if success:
-                return
+        try:
+            info = fping_info()
+            if info is not None:
+                self._fping_executable, self._fping_json = info
+                success = await self._run_fping()
+                if success:
+                    return
 
-        # Fallback engine when fping is absent or fails execution
-        await self._run_fallback_engine()
+            # Fallback engine when fping is absent or fails execution
+            await self._run_fallback_engine()
+        finally:
+            if self._async_stop_event is not None:
+                self._async_stop_event.set()
+            if flusher_task is not None:
+                flusher_task.cancel()
+                await asyncio.gather(flusher_task, return_exceptions=True)
+            if self._result_queue is not None:
+                final_batch = []
+                while not self._result_queue.empty():
+                    final_batch.append(self._result_queue.get_nowait())
+                if final_batch:
+                    self.signals.batch_completed.emit(self.run_id, final_batch)
 
     def run(self):
         try:

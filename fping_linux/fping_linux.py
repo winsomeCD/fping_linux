@@ -17,12 +17,12 @@ from collections import deque
 from pathlib import Path
 
 from PySide6.QtCore import Qt, Slot, QTimer, QPointF, QRectF, QThreadPool
-from PySide6.QtGui import QBrush, QColor, QFont, QPainter, QPen, QLinearGradient, QPainterPath, QFontDatabase
+from PySide6.QtGui import QBrush, QColor, QFont, QPainter, QPen, QLinearGradient, QPainterPath, QFontDatabase, QKeySequence
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QLabel, QVBoxLayout, QHBoxLayout,
     QGridLayout, QSplitter, QFileDialog, QAbstractItemView, QHeaderView,
     QTableWidget, QTableWidgetItem, QLineEdit, QDialog, QTextEdit,
-    QPushButton, QSpinBox, QDoubleSpinBox, QFrame, QMessageBox, QScrollArea,
+    QPushButton, QSpinBox, QDoubleSpinBox, QFrame, QMessageBox, QScrollArea, QMenu,
 )
 from fping_linux_probes import (
     NameLookupError,
@@ -182,14 +182,14 @@ class HostDetailDialog(QDialog):
             status_bg = "rgba(244, 63, 94, 0.12)" if self._dark else "#ffe4e6"
             status_border = "rgba(244, 63, 94, 0.35)" if self._dark else "#fecdd3"
 
-        status_pill = QLabel(f"● {status}")
-        status_pill.setTextFormat(Qt.PlainText)
-        status_pill.setStyleSheet(
+        self.status_pill = QLabel(f"● {status}")
+        self.status_pill.setTextFormat(Qt.PlainText)
+        self.status_pill.setStyleSheet(
             f"background: {status_bg}; color: {status_color}; border: 1px solid {status_border}; "
             "border-radius: 6px; font-weight: 700; font-size: 11px; padding: 4px 12px; "
             'font-family: -apple-system, "Segoe UI", "Ubuntu", sans-serif;'
         )
-        header_row.addWidget(status_pill)
+        header_row.addWidget(self.status_pill)
         layout.addLayout(header_row)
 
         # Metric Stats Cards (2x4 Grid with clean elevated containers)
@@ -225,6 +225,7 @@ class HostDetailDialog(QDialog):
                 ("RFC Jitter", "—"),
             ])
 
+        self._stat_val_labels = {}
         for i, (label, value) in enumerate(stats):
             row, col = i // 4, i % 4
             cell = QFrame()
@@ -240,6 +241,7 @@ class HostDetailDialog(QDialog):
             val = QLabel(str(value))
             val.setTextFormat(Qt.PlainText)
             val.setObjectName("detailStatValue")
+            self._stat_val_labels[label] = val
 
             cell_layout.addWidget(lbl)
             cell_layout.addWidget(val)
@@ -247,16 +249,18 @@ class HostDetailDialog(QDialog):
 
         layout.addWidget(stats_frame)
 
+        self.down_banner = None
+        self.down_lbl = None
         if self.data.get("last_down_time") and self.data.get("last_down_time") != "-":
-            down_banner = QFrame()
-            down_banner.setObjectName("detailDownBanner")
-            down_layout = QHBoxLayout(down_banner)
+            self.down_banner = QFrame()
+            self.down_banner.setObjectName("detailDownBanner")
+            down_layout = QHBoxLayout(self.down_banner)
             down_layout.setContentsMargins(12, 8, 12, 8)
-            down_lbl = QLabel(f"⚠️ Last Down Event Recorded: {self.data['last_down_time']}")
-            down_lbl.setTextFormat(Qt.PlainText)
-            down_lbl.setObjectName("detailDownLabel")
-            down_layout.addWidget(down_lbl)
-            layout.addWidget(down_banner)
+            self.down_lbl = QLabel(f"⚠️ Last Down Event Recorded: {self.data['last_down_time']}")
+            self.down_lbl.setTextFormat(Qt.PlainText)
+            self.down_lbl.setObjectName("detailDownLabel")
+            down_layout.addWidget(self.down_lbl)
+            layout.addWidget(self.down_banner)
 
         timeline_title = QLabel("TELEMETRY LOG STREAM (LAST 50 PROBES):")
         timeline_title.setTextFormat(Qt.PlainText)
@@ -279,6 +283,90 @@ class HostDetailDialog(QDialog):
         close_btn.clicked.connect(self.accept)
         btn_layout.addWidget(close_btn)
         layout.addLayout(btn_layout)
+
+        self._refresh_timer = QTimer(self)
+        self._refresh_timer.setInterval(1000)
+        self._refresh_timer.timeout.connect(self._refresh_live_data)
+        self._refresh_timer.start()
+
+    def _refresh_live_data(self):
+        parent = self.parent()
+        if not parent or not hasattr(parent, "host_data"):
+            return
+        live = parent.host_data.get(self.host)
+        if not live:
+            return
+        self.data = live
+        status = self.data.get("last_status", "Unknown")
+        if status == "Connected":
+            status_color = "#3ecf8e" if self._dark else "#16a34a"
+            status_bg = "rgba(62, 207, 142, 0.12)" if self._dark else "#dcfce7"
+            status_border = "rgba(62, 207, 142, 0.35)" if self._dark else "#86efac"
+        elif status in ("Queued", "Idle", None):
+            status_color = "#9ca3af" if self._dark else "#64748b"
+            status_bg = "rgba(156, 163, 175, 0.12)" if self._dark else "#f1f5f9"
+            status_border = "rgba(156, 163, 175, 0.30)" if self._dark else "#cbd5e1"
+        elif status in ("No ICMP Reply", "DNS Error"):
+            status_color = "#fbbf24" if self._dark else "#d97706"
+            status_bg = "rgba(251, 191, 36, 0.12)" if self._dark else "#fef3c7"
+            status_border = "rgba(251, 191, 36, 0.35)" if self._dark else "#fde68a"
+        else:
+            status_color = "#f43f5e" if self._dark else "#e11d48"
+            status_bg = "rgba(244, 63, 94, 0.12)" if self._dark else "#ffe4e6"
+            status_border = "rgba(244, 63, 94, 0.35)" if self._dark else "#fecdd3"
+
+        self.status_pill.setText(f"● {status}")
+        self.status_pill.setStyleSheet(
+            f"background: {status_bg}; color: {status_color}; border: 1px solid {status_border}; "
+            "border-radius: 6px; font-weight: 700; font-size: 11px; padding: 4px 12px; "
+            'font-family: -apple-system, "Segoe UI", "Ubuntu", sans-serif;'
+        )
+
+        sent = self.data.get("sent", 0)
+        received = self.data.get("received", 0)
+        loss_pct = round(((sent - received) / sent) * 100, 1) if sent > 0 else None
+        valid_latencies = [l for l in self.data.get("latencies", []) if l > 0]
+        stats = [
+            ("Packets Sent", sent),
+            ("Packets Received", received),
+            ("Packet Loss", f"{loss_pct}%" if loss_pct is not None else "n/a"),
+            ("Recent Samples", len(valid_latencies)),
+        ]
+        if valid_latencies:
+            rfc_jitter = calculate_rfc3550_jitter(valid_latencies)
+            stats.extend([
+                ("Min Latency", f"{min(valid_latencies):.2f} ms"),
+                ("Max Latency", f"{max(valid_latencies):.2f} ms"),
+                ("Avg Latency", f"{sum(valid_latencies) / len(valid_latencies):.2f} ms"),
+                ("RFC Jitter", f"{rfc_jitter:.2f} ms"),
+            ])
+        else:
+            stats.extend([
+                ("Min Latency", "—"),
+                ("Max Latency", "—"),
+                ("Avg Latency", "—"),
+                ("RFC Jitter", "—"),
+            ])
+        for k, v in stats:
+            if k in self._stat_val_labels:
+                self._stat_val_labels[k].setText(str(v))
+
+        if self.data.get("last_down_time") and self.data.get("last_down_time") != "-":
+            if self.down_banner is not None:
+                self.down_banner.setVisible(True)
+                if self.down_lbl is not None:
+                    self.down_lbl.setText(f"⚠️ Last Down Event Recorded: {self.data['last_down_time']}")
+
+        logs = self.data.get("timeline_stats", [])
+        new_text = "\n".join(logs[-50:]) if logs else "No timeline logs available."
+        if self.log_text.toPlainText() != new_text:
+            self.log_text.setText(new_text)
+            self.log_text.verticalScrollBar().setValue(self.log_text.verticalScrollBar().maximum())
+
+    def closeEvent(self, event):
+        if hasattr(self, "_refresh_timer"):
+            self._refresh_timer.stop()
+        super().closeEvent(event)
 
     def _apply_style(self):
         dark = self._dark
@@ -967,18 +1055,37 @@ class LatencyChart(QWidget):
                 painter.setBrush(QBrush(grad))
                 painter.drawPolygon(poly_points)
 
-            # Trace line
+            # Draw subtle red timeout drop ticks at the bottom axis for dropped packets
+            drop_pen = QPen(QColor("#f43f5e" if dark else "#e11d48"))
+            drop_pen.setWidthF(1.5)
+            for i, val in enumerate(values):
+                if val <= 0:
+                    x = points[i].x()
+                    painter.setPen(drop_pen)
+                    painter.drawLine(QPointF(x, plot.bottom() - 6), QPointF(x, plot.bottom()))
+
+            # Trace lines: solid between positive responses; subtle dotted bridge across drops
             painter.setPen(pen)
             painter.setBrush(Qt.NoBrush)
             for i in range(1, len(points)):
-                painter.drawLine(points[i - 1], points[i])
+                if values[i - 1] > 0 and values[i] > 0:
+                    painter.setPen(pen)
+                    painter.drawLine(points[i - 1], points[i])
+                else:
+                    dashed_pen = QPen(base_color)
+                    dashed_pen.setWidthF(1.0)
+                    dashed_pen.setStyle(Qt.DotLine)
+                    painter.setPen(dashed_pen)
+                    painter.drawLine(points[i - 1], points[i])
 
             # Endpoint live pulse dot with glowing halo
             if points:
-                painter.setBrush(QBrush(base_color))
+                last_is_up = values[-1] > 0
+                dot_color = base_color if last_is_up else QColor("#f43f5e" if dark else "#e11d48")
+                painter.setBrush(QBrush(dot_color))
                 painter.setPen(Qt.NoPen)
                 painter.drawEllipse(points[-1], 2.5, 2.5)
-                halo_pen = QPen(base_color)
+                halo_pen = QPen(dot_color)
                 halo_pen.setWidthF(1.0)
                 painter.setPen(halo_pen)
                 painter.setBrush(Qt.NoBrush)
@@ -1112,8 +1219,8 @@ class MetricCard(QFrame):
         self.setFrameShape(QFrame.NoFrame)
         self.accent_color = accent_color
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(12, 10, 12, 10)
-        layout.setSpacing(2)
+        layout.setContentsMargins(12, 5, 12, 5)
+        layout.setSpacing(1)
 
         header_row = QHBoxLayout()
         header_row.setContentsMargins(0, 0, 0, 0)
@@ -1122,7 +1229,7 @@ class MetricCard(QFrame):
         self.indicator_dot = QLabel("●")
         self.indicator_dot.setObjectName("metricDot")
         self.indicator_dot.setTextFormat(Qt.PlainText)
-        self.indicator_dot.setStyleSheet(f"color: {accent_color}; font-size: 8px; background: transparent;")
+        self.indicator_dot.setStyleSheet(f"color: {accent_color}; font-size: 7px; background: transparent;")
         header_row.addWidget(self.indicator_dot)
 
         self.lbl_title = QLabel(title.upper())
@@ -1172,6 +1279,10 @@ class PingMonitorApp(QMainWindow):
         self.probe_pool.setMaxThreadCount(1)
         self.host_data = {}
         self._host_items = {}
+        self._down_host_items = {}
+        self.main_splitter = None
+        self.vertical_splitter = None
+        self.lower_splitter = None
         self._last_down_signature = None
         self._active_sort_col = None
         self._active_sort_order = Qt.AscendingOrder
@@ -1276,9 +1387,9 @@ class PingMonitorApp(QMainWindow):
         root.addLayout(header)
 
         # Main Dual-Cockpit Horizontal Splitter (Left Sidebar Command Deck + Right Matrix Operations Deck)
-        main_splitter = QSplitter(Qt.Horizontal)
-        main_splitter.setObjectName("mainSplitter")
-        root.addWidget(main_splitter, 1)
+        self.main_splitter = QSplitter(Qt.Horizontal)
+        self.main_splitter.setObjectName("mainSplitter")
+        root.addWidget(self.main_splitter, 1)
 
         # ------------------------------------------------------------------ Left Command Sidebar Deck
         sidebar_scroll = QScrollArea()
@@ -1297,8 +1408,8 @@ class PingMonitorApp(QMainWindow):
         # 1. Vitals Matrix HUD (2x2 KPI Grid)
         vitals_card = CardFrame()
         vitals_layout = QVBoxLayout(vitals_card)
-        vitals_layout.setContentsMargins(12, 10, 12, 10)
-        vitals_layout.setSpacing(6)
+        vitals_layout.setContentsMargins(10, 6, 10, 6)
+        vitals_layout.setSpacing(4)
 
         vitals_caption = QLabel("TELEMETRY VITALS")
         vitals_caption.setObjectName("sidebarCaption")
@@ -1307,7 +1418,7 @@ class PingMonitorApp(QMainWindow):
 
         vitals_grid = QGridLayout()
         vitals_grid.setContentsMargins(0, 0, 0, 0)
-        vitals_grid.setSpacing(6)
+        vitals_grid.setSpacing(4)
 
         self.card_fleet = MetricCard("Monitored Targets", "0 Targets", "Awaiting start", accent_color="#3ecf8e")
         self.card_reachability = MetricCard("Fleet Reachability", "100%", "0 unreachable", accent_color="#00e5ff")
@@ -1516,7 +1627,7 @@ class PingMonitorApp(QMainWindow):
 
         sidebar_layout.addStretch()
         sidebar_scroll.setWidget(sidebar_container)
-        main_splitter.addWidget(sidebar_scroll)
+        self.main_splitter.addWidget(sidebar_scroll)
 
         # ------------------------------------------------------------------ Right Matrix Operations Deck
         ops_container = QWidget()
@@ -1551,6 +1662,7 @@ class PingMonitorApp(QMainWindow):
         # Integrated Filter Input
         self.search_box = QLineEdit()
         self.search_box.setPlaceholderText("Filter targets...")
+        self.search_box.setClearButtonEnabled(True)
         self.search_box.textChanged.connect(self.filter_table)
         self.search_box.setMinimumWidth(160)
         self.search_box.setMaximumWidth(220)
@@ -1586,9 +1698,11 @@ class PingMonitorApp(QMainWindow):
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.setSortingEnabled(False)
         self.table.setShowGrid(True)
-        self.table.setToolTip("Double-click any host to open detailed telemetry inspection")
+        self.table.setToolTip("Double-click any host to open detailed telemetry inspection (or Ctrl+C / right-click to copy)")
         self.table.viewport().setCursor(Qt.PointingHandCursor)
         self.table.doubleClicked.connect(self.on_table_double_click)
+        self.table.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.table.customContextMenuRequested.connect(self._show_table_context_menu)
         h = self.table.horizontalHeader()
         h.setFixedHeight(32)
         h.setSectionsClickable(True)
@@ -1598,18 +1712,19 @@ class PingMonitorApp(QMainWindow):
         h.setSectionResizeMode(QHeaderView.Stretch)
         h.setSectionResizeMode(0, QHeaderView.ResizeToContents)
         dash_layout.addWidget(self.table)
-        vertical.addWidget(dash_card)
+        self.vertical_splitter = vertical
+        self.vertical_splitter.addWidget(dash_card)
 
         # Lower Deck (Horizontal Splitter: Latency Chart & Incident Deck)
-        lower = QSplitter(Qt.Horizontal)
-        lower.setObjectName("lowerSplitter")
+        self.lower_splitter = QSplitter(Qt.Horizontal)
+        self.lower_splitter.setObjectName("lowerSplitter")
 
         chart_card = CardFrame()
         chart_layout = QVBoxLayout(chart_card)
         chart_layout.setContentsMargins(8, 8, 8, 8)
         self.chart = LatencyChart()
         chart_layout.addWidget(self.chart)
-        lower.addWidget(chart_card)
+        self.lower_splitter.addWidget(chart_card)
 
         down_card = CardFrame()
         down_layout = QVBoxLayout(down_card)
@@ -1635,8 +1750,10 @@ class PingMonitorApp(QMainWindow):
         self.down_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.down_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.down_table.setSortingEnabled(True)
-        self.down_table.setToolTip("Double-click any host to open detailed telemetry inspection")
+        self.down_table.setToolTip("Double-click any host to open detailed telemetry inspection (or Ctrl+C / right-click to copy)")
         self.down_table.viewport().setCursor(Qt.PointingHandCursor)
+        self.down_table.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.down_table.customContextMenuRequested.connect(self._show_down_table_context_menu)
         dh = self.down_table.horizontalHeader()
         dh.setFixedHeight(30)
         dh.setSortIndicatorShown(True)
@@ -1647,20 +1764,20 @@ class PingMonitorApp(QMainWindow):
         self.down_table.doubleClicked.connect(self.on_down_table_double_click)
         down_layout.addWidget(self.down_table)
 
-        lower.addWidget(down_card)
-        lower.setStretchFactor(0, 7)
-        lower.setStretchFactor(1, 3)
-        lower.setSizes([640, 310])
-        lower.setChildrenCollapsible(False)
-        vertical.addWidget(lower)
-        vertical.setStretchFactor(0, 3)
-        vertical.setStretchFactor(1, 2)
+        self.lower_splitter.addWidget(down_card)
+        self.lower_splitter.setStretchFactor(0, 7)
+        self.lower_splitter.setStretchFactor(1, 3)
+        self.lower_splitter.setSizes([640, 310])
+        self.lower_splitter.setChildrenCollapsible(False)
+        self.vertical_splitter.addWidget(self.lower_splitter)
+        self.vertical_splitter.setStretchFactor(0, 3)
+        self.vertical_splitter.setStretchFactor(1, 2)
 
-        main_splitter.addWidget(ops_container)
-        main_splitter.setStretchFactor(0, 0)
-        main_splitter.setStretchFactor(1, 1)
-        main_splitter.setSizes([340, 860])
-        main_splitter.setChildrenCollapsible(False)
+        self.main_splitter.addWidget(ops_container)
+        self.main_splitter.setStretchFactor(0, 0)
+        self.main_splitter.setStretchFactor(1, 1)
+        self.main_splitter.setSizes([340, 860])
+        self.main_splitter.setChildrenCollapsible(False)
 
         # Status Footer Bar
         self.footer_label = QLabel("ICMP Echo Engine • Ready")
@@ -1759,7 +1876,7 @@ class PingMonitorApp(QMainWindow):
         }}
         QLabel#metricValue {{
             color: {text_main};
-            font-size: 18px;
+            font-size: 14px;
             font-weight: 700;
             font-family: {mono_font_stack};
             letter-spacing: -0.3px;
@@ -2451,7 +2568,16 @@ class PingMonitorApp(QMainWindow):
             "send_gap_ms": self.send_gap_spin.value(),
             "history_points": self.history_spin.value(),
             "dark_theme": self._is_dark,
+            "window_width": self.width(),
+            "window_height": self.height(),
+            "is_maximized": self.isMaximized(),
         }
+        if self.main_splitter is not None:
+            config["main_splitter_sizes"] = self.main_splitter.sizes()
+        if self.vertical_splitter is not None:
+            config["vertical_splitter_sizes"] = self.vertical_splitter.sizes()
+        if self.lower_splitter is not None:
+            config["lower_splitter_sizes"] = self.lower_splitter.sizes()
         config_path = Path(self.CONFIG_FILE)
         temporary_path = None
         try:
@@ -2539,6 +2665,38 @@ class PingMonitorApp(QMainWindow):
                     "history_points": self.history_spin,
                 }[key].setValue(value)
             self._is_dark = dark_theme
+
+            if "window_width" in config and "window_height" in config and not config.get("is_maximized", False):
+                try:
+                    w = int(config["window_width"])
+                    h = int(config["window_height"])
+                    if w >= 760 and h >= 520:
+                        self.resize(w, h)
+                except (ValueError, TypeError):
+                    pass
+            if config.get("is_maximized", False):
+                self.showMaximized()
+            if "main_splitter_sizes" in config and self.main_splitter is not None:
+                try:
+                    sizes = [int(s) for s in config["main_splitter_sizes"]]
+                    if len(sizes) == 2 and all(s > 0 for s in sizes):
+                        self.main_splitter.setSizes(sizes)
+                except (ValueError, TypeError):
+                    pass
+            if "vertical_splitter_sizes" in config and self.vertical_splitter is not None:
+                try:
+                    sizes = [int(s) for s in config["vertical_splitter_sizes"]]
+                    if len(sizes) == 2 and all(s > 0 for s in sizes):
+                        self.vertical_splitter.setSizes(sizes)
+                except (ValueError, TypeError):
+                    pass
+            if "lower_splitter_sizes" in config and self.lower_splitter is not None:
+                try:
+                    sizes = [int(s) for s in config["lower_splitter_sizes"]]
+                    if len(sizes) == 2 and all(s > 0 for s in sizes):
+                        self.lower_splitter.setSizes(sizes)
+                except (ValueError, TypeError):
+                    pass
 
             self.apply_style()
             self.chart.set_dark(self._is_dark)
@@ -2668,7 +2826,10 @@ class PingMonitorApp(QMainWindow):
             interval=self.ping_interval_seconds,
             send_gap_ms=self.send_gap_ms,
         )
-        task.signals.completed.connect(self._handle_probe_result)
+        if hasattr(task.signals, "batch_completed"):
+            task.signals.batch_completed.connect(self._handle_probe_batch)
+        else:
+            task.signals.completed.connect(self._handle_probe_result)
         task.signals.finished.connect(self._handle_probe_task_finished)
         self.probe_task = task
         self.probe_pool.start(task)
@@ -2722,11 +2883,7 @@ class PingMonitorApp(QMainWindow):
                 QMessageBox.Warning,
             )
 
-    @Slot(int, str, object)
-    def _handle_probe_result(self, run_id, target, result):
-        if run_id != self._run_id or (not self.is_monitoring and not getattr(self, "_stop_pending", False)):
-            return
-
+    def _process_single_result(self, target, result, update_table=True):
         if target not in self.host_data:
             return
         if not isinstance(result, ProbeResult):
@@ -2792,6 +2949,9 @@ class PingMonitorApp(QMainWindow):
         del data["timeline_stats"][:-self.MAX_LOG_ENTRIES]
         del data["log_rows"][:-self.MAX_LOG_ENTRIES]
 
+        if not update_table:
+            return
+
         if status == "DNS Error":
             data["had_dns_error"] = True
             self.remove_host_row(target)
@@ -2829,6 +2989,22 @@ class PingMonitorApp(QMainWindow):
                 5: data["consecutive_fails"],
             }
             self.update_row(target, row_values, sort_values=sort_values)
+
+    @Slot(int, str, object)
+    def _handle_probe_result(self, run_id, target, result):
+        if run_id != self._run_id or (not self.is_monitoring and not getattr(self, "_stop_pending", False)):
+            return
+        self._process_single_result(target, result, update_table=True)
+
+    @Slot(int, list)
+    def _handle_probe_batch(self, run_id, batch):
+        if run_id != self._run_id or (not self.is_monitoring and not getattr(self, "_stop_pending", False)):
+            return
+        if not batch:
+            return
+        for item in batch:
+            if isinstance(item, (tuple, list)) and len(item) == 2:
+                self._process_single_result(item[0], item[1], update_table=True)
 
     def set_controls_enabled(self, enabled):
         self.host_entry.setEnabled(enabled)
@@ -2872,17 +3048,21 @@ class PingMonitorApp(QMainWindow):
             return
 
         dark = self._is_dark
-        text_color = QColor("#f4f4f5" if dark else "#09090b")
-        bg_color = QColor("#121215" if dark else "#ffffff")
-        mono_font = QFont("JetBrains Mono", 10)
-        mono_font.setFamilies(["JetBrains Mono", "Geist Mono", "Consolas", "Courier New"])
-        mono_font.setStyleHint(QFont.Monospace)
+        text_color = None
+        bg_color = None
+        mono_font = None
 
         for col, value in enumerate(values):
             val_str = str(value)
             sv = sort_values.get(col) if sort_values else None
             item = self.table.item(row, col)
             if item is None:
+                if text_color is None:
+                    text_color = QColor("#f4f4f5" if dark else "#09090b")
+                    bg_color = QColor("#121215" if dark else "#ffffff")
+                    mono_font = QFont("JetBrains Mono", 10)
+                    mono_font.setFamilies(["JetBrains Mono", "Geist Mono", "Consolas", "Courier New"])
+                    mono_font.setStyleHint(QFont.Monospace)
                 item = SortableTableWidgetItem(val_str, numeric=col in (2, 3, 4, 5), sort_value=sv)
                 item.setTextAlignment(Qt.AlignCenter)
                 if col in (2, 3, 4, 5):
@@ -2915,11 +3095,105 @@ class PingMonitorApp(QMainWindow):
             status_item.setToolTip(self.host_data.get(host, {}).get("last_error") or "")
 
     def filter_table(self, text):
-        text = text.strip().lower()
-        for row in range(self.table.rowCount()):
-            item = self.table.item(row, 0)
-            if item:
-                self.table.setRowHidden(row, text not in item.text().lower())
+        query = text.strip().lower()
+        visible_count = 0
+        total_rows = self.table.rowCount()
+        for row in range(total_rows):
+            col0 = self.table.item(row, 0)
+            col1 = self.table.item(row, 1)
+            host_text = col0.text().lower() if col0 else ""
+            status_text = col1.text().lower() if col1 else ""
+            matches = (not query) or (query in host_text) or (query in status_text)
+            self.table.setRowHidden(row, not matches)
+            if matches:
+                visible_count += 1
+
+        if query:
+            self.host_count_label.setText(f"Showing {visible_count} of {total_rows} targets")
+        else:
+            up_count = sum(d.get("last_status") == "Connected" for d in self.host_data.values())
+            self.host_count_label.setText(f"{up_count} up / {len(self.host_data)} total")
+
+    def keyPressEvent(self, event):
+        if event.matches(QKeySequence.Copy):
+            focused = self.focusWidget()
+            if focused == self.table or (isinstance(focused, QWidget) and focused.parent() == self.table):
+                self._copy_table_selection(self.table)
+                return
+            elif focused == self.down_table or (isinstance(focused, QWidget) and focused.parent() == self.down_table):
+                self._copy_table_selection(self.down_table)
+                return
+        super().keyPressEvent(event)
+
+    def _copy_table_selection(self, table: QTableWidget):
+        selected_ranges = table.selectedRanges()
+        if not selected_ranges:
+            current_row = table.currentRow()
+            if current_row >= 0:
+                row_vals = [
+                    table.item(current_row, c).text() if table.item(current_row, c) else ""
+                    for c in range(table.columnCount())
+                ]
+                QApplication.clipboard().setText("\t".join(row_vals))
+            return
+        lines = []
+        for r_range in selected_ranges:
+            for r in range(r_range.topRow(), r_range.bottomRow() + 1):
+                if table.isRowHidden(r):
+                    continue
+                row_vals = [
+                    table.item(r, c).text() if table.item(r, c) else ""
+                    for c in range(r_range.leftColumn(), r_range.rightColumn() + 1)
+                ]
+                lines.append("\t".join(row_vals))
+        if lines:
+            QApplication.clipboard().setText("\n".join(lines))
+
+    def _show_table_context_menu(self, pos):
+        item = self.table.itemAt(pos)
+        if not item:
+            return
+        row = item.row()
+        host_item = self.table.item(row, 0)
+        host = host_item.text() if host_item else ""
+        menu = QMenu(self)
+        copy_host_act = menu.addAction(f"Copy Host ({host})")
+        copy_row_act = menu.addAction("Copy Selected Rows (TSV)")
+        menu.addSeparator()
+        inspect_act = menu.addAction("Inspect Telemetry Details")
+        action = menu.exec(self.table.viewport().mapToGlobal(pos))
+        if action == copy_host_act:
+            QApplication.clipboard().setText(host)
+        elif action == copy_row_act:
+            self._copy_table_selection(self.table)
+        elif action == inspect_act:
+            data = self.host_data.get(host)
+            if data:
+                dlg = HostDetailDialog(host, data, dark=self._is_dark, parent=self)
+                dlg.exec()
+
+    def _show_down_table_context_menu(self, pos):
+        item = self.down_table.itemAt(pos)
+        if not item:
+            return
+        row = item.row()
+        host_item = self.down_table.item(row, 0)
+        host = host_item.text() if host_item else ""
+        menu = QMenu(self)
+        copy_host_act = menu.addAction(f"Copy Host ({host})")
+        copy_row_act = menu.addAction("Copy Selected Rows (TSV)")
+        menu.addSeparator()
+        inspect_act = menu.addAction("Inspect Telemetry Details")
+        action = menu.exec(self.down_table.viewport().mapToGlobal(pos))
+        if action == copy_host_act:
+            QApplication.clipboard().setText(host)
+        elif action == copy_row_act:
+            self._copy_table_selection(self.down_table)
+        elif action == inspect_act:
+            data = self.host_data.get(host)
+            if data:
+                dlg = HostDetailDialog(host, data, dark=self._is_dark, parent=self)
+                dlg.exec()
 
     def on_table_double_click(self, index):
         row = index.row()
@@ -2948,6 +3222,8 @@ class PingMonitorApp(QMainWindow):
             return
         self.host_data.clear()
         self._host_items.clear()
+        self._down_host_items.clear()
+        self._last_down_signature = None
         self._active_sort_col = None
         self._active_sort_order = Qt.AscendingOrder
         self.table.horizontalHeader().setSortIndicatorShown(False)
@@ -3044,8 +3320,6 @@ class PingMonitorApp(QMainWindow):
         )
         if signature != self._last_down_signature:
             self._last_down_signature = signature
-            self.down_table.setSortingEnabled(False)
-            self.down_table.setRowCount(0)
             dark = self._is_dark
             probe_issues = len(probe_issue_signature)
             summary_parts = []
@@ -3074,6 +3348,17 @@ class PingMonitorApp(QMainWindow):
                 self.down_summary_label.setStyleSheet(
                     f"color: {'#10b981' if dark else '#059669'}; font-weight: 600; background: transparent;"
                 )
+
+            # In-place down table row synchronization to preserve user selection & scroll
+            current_down_hosts = {h for h, _ in down_hosts}
+            for host in list(self._down_host_items.keys()):
+                if host not in current_down_hosts:
+                    item = self._down_host_items.pop(host, None)
+                    if item:
+                        r = item.row()
+                        if r >= 0:
+                            self.down_table.removeRow(r)
+
             if down_hosts:
                 text_color = QColor("#f4f4f5" if dark else "#09090b")
                 bg_color = QColor("#121215" if dark else "#ffffff")
@@ -3081,8 +3366,6 @@ class PingMonitorApp(QMainWindow):
                 mono_font.setFamilies(["JetBrains Mono", "Geist Mono", "Consolas", "Courier New"])
                 mono_font.setStyleHint(QFont.Monospace)
                 for host, data in down_hosts:
-                    row = self.down_table.rowCount()
-                    self.down_table.insertRow(row)
                     sent = data["sent"]
                     received = data["received"]
                     loss = round(((sent - received) / sent) * 100, 1) if sent else None
@@ -3093,15 +3376,44 @@ class PingMonitorApp(QMainWindow):
                         f"{loss}%" if loss is not None else "n/a",
                         data.get("last_down_time", "-"),
                     ]
-                    for col, value in enumerate(values):
-                        item = SortableTableWidgetItem(str(value), numeric=col in (2, 3))
-                        item.setTextAlignment(Qt.AlignCenter)
-                        if col in (2, 3):
-                            item.setFont(mono_font)
-                        item.setForeground(text_color)
-                        item.setBackground(bg_color)
-                        self.down_table.setItem(row, col, item)
-            self.down_table.setSortingEnabled(True)
+                    sort_values = {
+                        2: float(data.get("consecutive_fails", 0)),
+                        3: float(loss if loss is not None else -1),
+                    }
+                    col0 = self._down_host_items.get(host)
+                    if col0 is None:
+                        row = self.down_table.rowCount()
+                        self.down_table.insertRow(row)
+                        for col, value in enumerate(values):
+                            sv = sort_values.get(col)
+                            item = SortableTableWidgetItem(str(value), numeric=col in (2, 3), sort_value=sv)
+                            item.setTextAlignment(Qt.AlignCenter)
+                            item.setForeground(text_color)
+                            item.setBackground(bg_color)
+                            if col in (2, 3):
+                                item.setFont(mono_font)
+                            self.down_table.setItem(row, col, item)
+                            if col == 0:
+                                self._down_host_items[host] = item
+                    else:
+                        row = col0.row()
+                        if row >= 0:
+                            for col, value in enumerate(values):
+                                sv = sort_values.get(col)
+                                item = self.down_table.item(row, col)
+                                if item and hasattr(item, "set_value"):
+                                    item.set_value(str(value), sort_value=sv)
+                                elif item:
+                                    item.setText(str(value))
+                    status_col_item = self.down_table.item(row, 1)
+                    if status_col_item:
+                        status_str = str(data.get("last_status", "Down"))
+                        if "Connected" in status_str:
+                            status_col_item.setForeground(QColor("#10b981" if dark else "#059669"))
+                        elif "No ICMP Reply" in status_str:
+                            status_col_item.setForeground(QColor("#f59e0b" if dark else "#d97706"))
+                        else:
+                            status_col_item.setForeground(QColor("#f43f5e" if dark else "#e11d48"))
         self.update_footer_stats()
 
     def update_footer_stats(self):
