@@ -831,6 +831,42 @@ class TestDNSIssuesIsolationAndUI(unittest.TestCase):
         win.close()
 
 
+class TestCoreDecoupling(unittest.TestCase):
+    def test_core_and_probes_work_without_qt(self):
+        import subprocess
+        import tempfile
+
+        pkg_dir = Path(__file__).resolve().parent.parent
+        with tempfile.TemporaryDirectory() as tmpdir:
+            script = (
+                "import sys; "
+                "sys.modules['PySide6'] = None; "
+                "sys.modules['PySide6.QtCore'] = None; "
+                f"sys.path.insert(0, {str(pkg_dir)!r}); "
+                "from fping_linux_probes import ProbeEngine, ProbeResult, _HAS_QT; "
+                "import fping_linux_core as core; "
+                "assert _HAS_QT is False; "
+                "rec = core.create_host_record('8.8.8.8'); "
+                "res, seq, lat, ltxt = core.record_probe_result(rec, ProbeResult('Connected', 12.5)); "
+                "assert (seq, lat, ltxt) == (1, 12.5, '12.50 ms'); "
+                "snap = {'8.8.8.8': rec}; "
+                "summary = core.build_summary_info(snap); "
+                "assert summary['Targets responding to ICMP'] == 1; "
+                f"core.export_summary_txt(snap, {str(Path(tmpdir) / 'r.txt')!r}); "
+                f"core.export_report_csv(snap, {str(Path(tmpdir) / 'r.csv')!r}); "
+                f"core.export_report_xlsx(snap, {str(Path(tmpdir) / 'r.xlsx')!r}); "
+                "eng = ProbeEngine(['127.0.0.1']); "
+                "assert eng.targets == ['127.0.0.1']; "
+            )
+            proc = subprocess.run(
+                [sys.executable, "-c", script],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr or proc.stdout)
+
+
 if __name__ == "__main__":
     unittest.main()
 

@@ -12,10 +12,14 @@ import struct
 import subprocess
 import threading
 import time
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
-from PySide6.QtCore import QObject, QRunnable, Signal
+try:
+    from PySide6.QtCore import QObject, QRunnable, Signal
+    _HAS_QT = True
+except ImportError:
+    _HAS_QT = False
 
 MAX_CONCURRENT_DNS_LOOKUPS = 40
 DNS_CACHE_TTL = 300.0  # 5 minutes
@@ -601,32 +605,28 @@ class AsyncICMPSession:
             self._v6_sock = None
 
 
-class ProbeSignals(QObject):
-    completed = Signal(int, str, object)
-    batch_completed = Signal(int, list)
-    finished = Signal(int)
-
-
-class ProbeTask(QRunnable):
-    """Monitor targets through Linux fping process or multiplexed ICMP fallback."""
+class ProbeEngine:
+    """Pure-Python asynchronous target prober using fping or multiplexed ICMP fallback."""
 
     def __init__(
         self,
-        run_id: int,
         targets: Sequence[str],
-        payload_size: int,
-        timeout: float,
-        interval: float,
-        send_gap_ms: int,
+        payload_size: int = 56,
+        timeout: float = 1.0,
+        interval: float = 1.0,
+        send_gap_ms: int = 10,
+        on_result: Callable[[str, ProbeResult], None] | None = None,
+        on_batch: Callable[[list[tuple[str, ProbeResult]]], None] | None = None,
+        on_finished: Callable[[], None] | None = None,
     ):
-        super().__init__()
-        self.run_id = run_id
         self.targets = list(targets)
         self.payload_size = payload_size
         self.timeout = timeout
         self.interval = interval
         self.send_gap_ms = send_gap_ms
-        self.signals = ProbeSignals()
+        self.on_result = on_result
+        self.on_batch = on_batch
+        self.on_finished = on_finished
         self._dns_resolver = DNSResolver()
         self._stop_requested = threading.Event()
         self._loop: asyncio.AbstractEventLoop | None = None
@@ -649,7 +649,8 @@ class ProbeTask(QRunnable):
                 pass
 
     async def _emit_result(self, target: str, result: ProbeResult):
-        self.signals.completed.emit(self.run_id, target, result)
+        if self.on_result is not None:
+            self.on_result(target, result)
         if self._result_queue is not None:
             await self._result_queue.put((target, result))
 
@@ -665,8 +666,8 @@ class ProbeTask(QRunnable):
                     self._result_queue.task_done()
             except (asyncio.TimeoutError, asyncio.CancelledError):
                 pass
-            if batch:
-                self.signals.batch_completed.emit(self.run_id, batch)
+            if batch and self.on_batch is not None:
+                self.on_batch(batch)
             if self._async_stop_event.is_set() and (self._result_queue is None or self._result_queue.empty()):
                 break
 
@@ -1014,11 +1015,11 @@ class ProbeTask(QRunnable):
                 )
         return True
 
-    async def _run(self):
+    async def run_async(self):
         self._loop = asyncio.get_running_loop()
         self._async_stop_event = asyncio.Event()
-        self._result_queue = asyncio.Queue()
-        flusher_task = asyncio.create_task(self._flusher())
+        self._result_queue = asyncio.Queue() if self.on_batch is not None else None
+        flusher_task = asyncio.create_task(self._flusher()) if self.on_batch is not None else None
         if self._stop_requested.is_set():
             self._async_stop_event.set()
 
@@ -1038,22 +1039,73 @@ class ProbeTask(QRunnable):
             if flusher_task is not None:
                 flusher_task.cancel()
                 await asyncio.gather(flusher_task, return_exceptions=True)
-            if self._result_queue is not None:
+            if self._result_queue is not None and self.on_batch is not None:
                 final_batch = []
                 while not self._result_queue.empty():
                     final_batch.append(self._result_queue.get_nowait())
                 if final_batch:
-                    self.signals.batch_completed.emit(self.run_id, final_batch)
+                    self.on_batch(final_batch)
+
+    _run = run_async
 
     def run(self):
         try:
-            asyncio.run(self._run())
+            asyncio.run(self.run_async())
         except Exception as error:
+            error_batch = []
             for target in self.targets:
-                self.signals.completed.emit(
-                    self.run_id,
-                    target,
-                    ProbeResult("Probe Error", error=str(error), packet_sent=False),
-                )
+                res = ProbeResult("Probe Error", error=str(error), packet_sent=False)
+                if self.on_result is not None:
+                    self.on_result(target, res)
+                error_batch.append((target, res))
+            if error_batch and self.on_batch is not None:
+                self.on_batch(error_batch)
         finally:
-            self.signals.finished.emit(self.run_id)
+            if self.on_finished is not None:
+                self.on_finished()
+
+
+if _HAS_QT:
+    class ProbeSignals(QObject):
+        completed = Signal(int, str, object)
+        batch_completed = Signal(int, list)
+        finished = Signal(int)
+
+
+    class ProbeTask(QRunnable):
+        """Qt QRunnable adapter wrapping ProbeEngine."""
+
+        def __init__(
+            self,
+            run_id: int,
+            targets: Sequence[str],
+            payload_size: int,
+            timeout: float,
+            interval: float,
+            send_gap_ms: int,
+        ):
+            super().__init__()
+            self.run_id = run_id
+            self.signals = ProbeSignals()
+            self._engine = ProbeEngine(
+                targets=targets,
+                payload_size=payload_size,
+                timeout=timeout,
+                interval=interval,
+                send_gap_ms=send_gap_ms,
+                on_result=lambda target, res: self.signals.completed.emit(self.run_id, target, res),
+                on_batch=lambda batch: self.signals.batch_completed.emit(self.run_id, batch),
+                on_finished=lambda: self.signals.finished.emit(self.run_id),
+            )
+            self.targets = self._engine.targets
+            self.payload_size = self._engine.payload_size
+            self.timeout = self._engine.timeout
+            self.interval = self._engine.interval
+            self.send_gap_ms = self._engine.send_gap_ms
+            self._dns_resolver = self._engine._dns_resolver
+
+        def request_stop(self):
+            self._engine.request_stop()
+
+        def run(self):
+            self._engine.run()
